@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DHL M2X Depo Yönetim | Canli Takip</title>
+    <!-- Paho MQTT Kütüphanesi -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <!-- Harici CSS Dosyasi -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- GIRIS (LOGIN) MODALI -->
+    <div id="login-overlay">
+        <div class="login-card">
+            <div class="login-header">
+                <h1 class="dhl-logo">DHL</h1>
+                <h2>M2X Depo Giris Portali</h2>
+            </div>
+            
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="username-select">Yonetici Secin (Host):</label>
+                    <select id="username-select" class="login-input">
+                        <option value="abdullah">Abdullah Carkci</option>
+                        <option value="efe">Enver Efe Timur</option>
+                        <option value="yusuf">Yusuf Gungor</option>
+                        <option value="harun">Harun Kurt</option>
+                        <option value="cem">Cem</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="password-input">Sifre:</label>
+                    <input type="password" id="password-input" class="login-input" placeholder="Sifrenizi giriniz">
+                </div>
+
+                <div id="login-error" class="login-error"></div>
+
+                <button type="submit" class="btn-login">Giris Yap (Host / Admin)</button>
+            </form>
+
+            <div class="login-divider"><span>VEYA</span></div>
+
+            <button type="button" class="btn-guest" onclick="loginAsGuest()">
+                🛡️ Guvenlik Gorevlisi / Misafir Girisi (Sadece Izleme)
+            </button>
+        </div>
+    </div>
+
+    <!-- BILDIRIM ALANI (Sag Ust) -->
+    <div id="notification-area"></div>
+
+    <!-- UST BANT -->
+    <header>
+        <div class="logo-area">
+            <h1 class="dhl-logo">DHL</h1>
+            <span class="header-title">DHL M2X Depo Yönetim</span>
+        </div>
+        <div class="status-area">
+            <span id="mqtt-status" class="mqtt-status">MQTT: Baglaniyor...</span>
+            
+            <!-- AKTiF KULLANICI / ROL ROZETI -->
+            <div class="user-badge">
+                <span id="active-user-name">Giris Yapilmadi</span>
+                <span id="active-user-role" class="role-tag">--</span>
+                <button class="btn-logout" onclick="logout()" title="Cikis Yap">🚪</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ANA TASLAK -->
+    <div id="main-content">
+        <!-- UST 5'LI DEPO GRID -->
+        <div class="depot-grid">
+            <!-- 1. Esenyurt -->
+            <div class="depot-card" id="card-esenyurt" onclick="handleDepotClick('esenyurt', 'Esenyurt Lojistik M.')">
+                <h3>ESENYURT</h3>
+                <p>İstanbul Avrupa</p>
+                <div class="quick-metrics">
+                    <span class="m-temp">--°C</span>
+                    <span class="m-hum">--%</span>
+                    <span id="door-esenyurt" class="door-tag door-closed">KAPALI</span>
+                </div>
+            </div>
+            <!-- 2. Gebze -->
+            <div class="depot-card" id="card-gebze" onclick="handleDepotClick('gebze', 'Gebze Lojistik M.')">
+                <h3>GEBZE</h3>
+                <p>Kocaeli / Marmara</p>
+                <div class="quick-metrics">
+                    <span class="m-temp">--°C</span>
+                    <span class="m-hum">--%</span>
+                    <span id="door-gebze" class="door-tag door-closed">KAPALI</span>
+                </div>
+            </div>
+            <!-- 3. Tuzla -->
+            <div class="depot-card" id="card-tuzla" onclick="handleDepotClick('tuzla', 'Tuzla (Asya 1) Lojistik M.')">
+                <h3>TUZLA</h3>
+                <p>İstanbul Anadolu</p>
+                <div class="quick-metrics">
+                    <span class="m-temp">--°C</span>
+                    <span class="m-hum">--%</span>
+                    <span id="door-tuzla" class="door-tag door-closed">KAPALI</span>
+                </div>
+            </div>
+            <!-- 4. Orhanli -->
+            <div class="depot-card" id="card-orhanli" onclick="handleDepotClick('orhanli', 'Orhanli Lojistik M.')">
+                <h3>ORHANLI</h3>
+                <p>İstanbul Anadolu</p>
+                <div class="quick-metrics">
+                    <span class="m-temp">--°C</span>
+                    <span class="m-hum">--%</span>
+                    <span id="door-orhanli" class="door-tag door-closed">KAPALI</span>
+                </div>
+            </div>
+            <!-- 5. Hadimkoy -->
+            <div class="depot-card" id="card-hadimkoy" onclick="handleDepotClick('hadimkoy', 'Hadimkoy Lojistik M.')">
+                <h3>HADIMKOY</h3>
+                <p>İstanbul Avrupa</p>
+                <div class="quick-metrics">
+                    <span class="m-temp">--°C</span>
+                    <span class="m-hum">--%</span>
+                    <span id="door-hadimkoy" class="door-tag door-closed">KAPALI</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ALT TASLAK -->
+        <div class="bottom-sections">
+            <div class="panel-box">
+                <div class="panel-header">
+                    <span>📋 KULLANICI ETKINLIK VE DENETIM LOGLARI (AUDIT TRAIL)</span>
+                    <button class="btn-clear-log" onclick="clearLogs()">Loglari Temizle</button>
+                </div>
+                <div style="overflow-y: auto; flex: 1; max-height: 220px;">
+                    <table class="log-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%;">SAAT</th>
+                                <th style="width: 25%;">KULLANICI / ROL</th>
+                                <th style="width: 20%;">DEPO / KONUM</th>
+                                <th style="width: 40%;">YAPILAN ISLEM / ETKINLIK</th>
+                            </tr>
+                        </thead>
+                        <tbody id="log-tbody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="panel-box">
+                <div class="panel-header">SISTEM VE KULLANICI BILGISI</div>
+                <div class="info-row"><span class="info-label">Mimari Katman:</span> <span class="info-value">M2X / REST / MQTT</span></div>
+                <div class="info-row"><span class="info-label">MQTT Broker:</span> <span class="info-value">broker.hivemq.com</span></div>
+                <div class="info-row"><span class="info-label">Toplam Depo:</span> <span class="info-value">5 Depo</span></div>
+                <div class="info-row"><span class="info-label">Kayitli Yöneticiler:</span> <span class="info-value">5 Host</span></div>
+                <div class="info-row"><span class="info-label">Son Oturum Acan:</span> <span class="info-value" id="last-login-user">Henüz yok</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- KROKI VE KONTROL MODALI -->
+    <div id="details-overlay">
+        <div class="details-box">
+            <div class="details-header">
+                <h2 id="modal-title">Depo Detayi</h2>
+                <button class="close-btn" onclick="closeDetails()">&times;</button>
+            </div>
+            <div class="details-content">
+                <div class="kroki-pane">
+                    <div class="kroki-label">ACIK KROKI VE CIHAZ KONUMLARI</div>
+                    <div class="kroki-area">
+                        <svg class="svg-floorplan" viewBox="0 0 400 280">
+                            <rect class="room-wall" x="10" y="10" width="380" height="260" rx="2" ry="2" />
+                            <line class="room-wall" x1="250" y1="10" x2="250" y2="120" />
+                            <line class="room-wall" x1="250" y1="120" x2="390" y2="120" />
+                            <line class="room-wall" x1="100" y1="150" x2="100" y2="270" />
+                            <line class="room-wall" x1="10" y1="150" x2="100" y2="150" />
+
+                            <line id="svg-door-main" class="door-w" x1="150" y1="270" x2="230" y2="270" />
+                            <line class="door-w" x1="250" y1="50" x2="250" y2="90" />
+
+                            <text class="room-label" x="130" y="100">GENEL DEPO ALANI</text>
+                            <text class="room-label" x="320" y="70">OFIS</text>
+                            <text class="room-label" x="55" y="220">MUTFAK</text>
+
+                            <rect id="svg-tv" class="device-icon device-off" x="350" y="30" width="30" height="20" rx="2" />
+                            <text x="365" y="44" text-anchor="middle" fill="white" font-size="9" font-weight="bold">TV</text>
+                            
+                            <circle id="svg-coffee" class="device-icon device-off" cx="280" cy="90" r="12" />
+                            <text x="280" y="93" text-anchor="middle" fill="white" font-size="10">☕</text>
+
+                            <circle id="svg-toaster" class="device-icon device-off" cx="70" cy="180" r="12" />
+                            <text x="70" y="183" text-anchor="middle" fill="white" font-size="10">🔥</text>
+
+                            <circle id="svg-fan" class="device-icon device-off" cx="40" cy="40" r="15" />
+                            <text x="40" y="43" text-anchor="middle" fill="white" font-size="12">💨</text>
+                        </svg>
+                    </div>
+                </div>
+                <div class="control-pane">
+                    <div class="sensor-group">
+                        <div class="group-title">ORTAM BILGISI</div>
+                        <div class="ctrl-row"><span>Sicaklik:</span> <strong id="modal-temp">-- °C</strong></div>
+                        <div class="ctrl-row"><span>Nem:</span> <strong id="modal-hum">-- %</strong></div>
+                    </div>
+                    <div class="sensor-group">
+                        <div class="group-title">HAVALANDIRMA</div>
+                        <div class="ctrl-row">
+                            <span>Fan Durumu:</span>
+                            <div class="btn-group">
+                                <span id="m-status-fan" class="status-text text-off">KAPALI</span>
+                                <button class="btn-ctrl btn-on-act" onclick="sendControl('fan', 'ON')">AC</button>
+                                <button class="btn-ctrl btn-off-act" onclick="sendControl('fan', 'OFF')">KAPAT</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sensor-group">
+                        <div class="group-title">UZAKTAN KONTROL (HOST)</div>
+                        <div class="ctrl-row">
+                            <span>Ofis - TV:</span>
+                            <div class="btn-group">
+                                <span id="m-status-tv" class="status-text text-off">KAPALI</span>
+                                <button class="btn-ctrl btn-on-act" onclick="sendControl('tv', 'ON')">AC</button>
+                                <button class="btn-ctrl btn-off-act" onclick="sendControl('tv', 'OFF')">KAPAT</button>
+                            </div>
+                        </div>
+                        <div class="ctrl-row">
+                            <span>Mutfak - Tost Mak.:</span>
+                            <div class="btn-group">
+                                <span id="m-status-toaster" class="status-text text-off">KAPALI</span>
+                                <button class="btn-ctrl btn-on-act" onclick="sendControl('toaster', 'ON')">AC</button>
+                                <button class="btn-ctrl btn-off-act" onclick="sendControl('toaster', 'OFF')">KAPAT</button>
+                            </div>
+                        </div>
+                        <div class="ctrl-row">
+                            <span>Ofis - Kahve Mak.:</span>
+                            <div class="btn-group">
+                                <span id="m-status-coffee" class="status-text text-off">KAPALI</span>
+                                <button class="btn-ctrl btn-on-act" onclick="sendControl('coffee', 'ON')">AC</button>
+                                <button class="btn-ctrl btn-off-act" onclick="sendControl('coffee', 'OFF')">KAPAT</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
