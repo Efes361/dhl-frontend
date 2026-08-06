@@ -1,3 +1,7 @@
+/* ===========================================================
+   DHL M2X DEPO YÖNETİM PANELİ - STİL DOSYASI
+   =========================================================== */
+
 :root {
     --dhl-yellow: #FFCC00;
     --dhl-red: #D40511;
@@ -24,7 +28,17 @@ body {
     overflow: hidden;
 }
 
-/* --- LOGIN MODAL --- */
+/* Klavye ile gezinen kullanıcılar için görünür odak (erişilebilirlik) */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.depot-card:focus-visible {
+    outline: 3px solid var(--dhl-red);
+    outline-offset: 2px;
+}
+
+/* --- GİRİŞ (LOGIN) MODALI --- */
 #login-overlay {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
@@ -38,11 +52,26 @@ body {
 .login-card {
     background: white;
     width: 400px;
+    max-width: 92vw;
     padding: 30px;
     border-radius: 12px;
     box-shadow: 0 10px 25px rgba(0,0,0,0.3);
     border-top: 6px solid var(--dhl-red);
     text-align: center;
+}
+
+.login-header {
+    margin-bottom: 10px;
+}
+
+/* Giriş ekranındaki DHL logosu, üst banttaki sarı zemin/kırmızı yazı
+   görünümüyle eşleşsin diye sarı bir rozet içine alınıyor. */
+.login-header .dhl-logo {
+    display: inline-block;
+    background: var(--dhl-yellow);
+    padding: 6px 22px;
+    border-radius: 6px;
+    font-size: 2.4rem;
 }
 
 .login-header h2 {
@@ -151,6 +180,8 @@ header {
     border-bottom: 4px solid var(--dhl-red);
     flex-shrink: 0;
     z-index: 100;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 .logo-area {
@@ -384,6 +415,7 @@ header {
     justify-content: center;
     align-items: center;
     z-index: 1000;
+    padding: 20px;
 }
 
 .details-box {
@@ -429,6 +461,7 @@ header {
     gap: 20px;
     flex: 1;
     overflow: hidden;
+    overflow-y: auto;
 }
 
 .kroki-pane {
@@ -436,13 +469,40 @@ header {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-width: 260px;
 }
 
 .kroki-label {
     font-size: 0.9rem;
     font-weight: bold;
     color: #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
 }
+
+.kroki-legend {
+    font-size: 0.75rem;
+    font-weight: normal;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.legend-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-left: 8px;
+    margin-right: 2px;
+}
+
+.legend-dot.legend-on { background: var(--safe-green); }
+.legend-dot.legend-off { background: var(--alarm-red); }
 
 .kroki-area {
     background: #F1F3F5;
@@ -451,22 +511,18 @@ header {
     position: relative;
     border-radius: 4px;
     overflow: hidden;
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.svg-floorplan {
+.kroki-image {
     width: 100%;
     height: 100%;
+    object-fit: contain;
+    background: white;
 }
-
-.room-wall { fill: none; stroke: #333; stroke-width: 3; }
-.room-label { fill: #555; font-size: 14px; font-weight: bold; text-anchor: middle; }
-.device-icon { stroke-width: 1; stroke: #333; transition: fill 0.3s; }
-
-.device-off { fill: var(--alarm-red); }
-.device-on { fill: var(--safe-green); }
-
-.door-w { stroke-width: 4; stroke: brown; transition: stroke 0.3s; }
-.door-open-w { stroke: red; }
 
 .control-pane {
     width: 320px;
@@ -537,6 +593,7 @@ header {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    max-width: 90vw;
 }
 
 .notify-box {
@@ -554,3 +611,36 @@ header {
 .notify-box.show { transform: translateX(0); }
 .notify-user { color: var(--dhl-yellow); font-weight: bold; }
 .notify-action { font-weight: bold; }
+
+/* --- KÜÇÜK EKRANLAR İÇİN DUYARLI (RESPONSIVE) DÜZEN --- */
+@media (max-width: 1100px) {
+    .depot-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .bottom-sections {
+        grid-template-columns: 1fr;
+    }
+
+    .details-content {
+        flex-direction: column;
+    }
+
+    .control-pane {
+        width: 100%;
+    }
+}
+
+@media (max-width: 640px) {
+    header {
+        padding: 10px 16px;
+    }
+
+    #main-content {
+        padding: 16px;
+    }
+
+    .depot-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
