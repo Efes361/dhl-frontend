@@ -2,28 +2,20 @@
 
 /**
  * DHL M2X Depo Izleme Paneli - İstemci Tarafı Uygulama Mantığı
- * -----------------------------------------------------------
- * NOT (GÜVENLİK UYARISI): Kullanıcı adı/şifre listesi burada, tarayıcıda
- * çalışan JS içinde açık şekilde tutuluyor. Bu sadece demo/prototip
- * amaçlıdır. Gerçek bir üretim ortamında kimlik doğrulama MUTLAKA
- * sunucu tarafında (backend + hashlenmiş şifre + oturum/token) yapılmalıdır;
- * aksi halde herkes tarayıcı konsolundan tüm şifreleri okuyabilir.
  */
 
 // ============================================================
-// SABİTLER VE YAPILANDIRMA
+// SABITLER VE YAPILANDIRMA
 // ============================================================
 
-// Host (yönetici) kullanıcıları: kullanıcı adı -> { görünen ad, şifre }
 const hostUsers = {
-    abdullah: { name: "Abdullah Carkci", pass: "abdullah123" },
-    efe:      { name: "Enver Efe Timur", pass: "efem6134" },
-    yusuf:    { name: "Yusuf Gungor",    pass: "yusuf123" },
-    harun:    { name: "Harun Kurt",      pass: "harun123" },
-    cem:      { name: "Cem",             pass: "cem123" },
+    abdullah: { name: "Abdullah Carkci", passHash: "4c4020cd2e832dab7b42f2b779ad0b0df3a14260b0688c868317c01ac30c74d1" },
+    efe:      { name: "Enver Efe Timur", passHash: "ed0ade8781c97daf80d8947be3c7086cb60527a021473ce14097cacdcd61dd1c" },
+    yusuf:    { name: "Yusuf Gungor",    passHash: "7772448cf067ba366d81d3133feb61e449e65e3e6d516371cb2754e329c691b4" },
+    harun:    { name: "Harun Kurt",      passHash: "60a29b64b279a5e1dfdd4856ad23476186697cda860bc87f9bceaa0274deccca" },
+    cem:      { name: "Cem",             passHash: "32a67e24fade79397c51fe787c1208fbaea76e67608686e2d7ba0dd11a2dce7a" },
 };
 
-// Cihaz anahtarı -> ekranda gösterilecek okunabilir isim
 const deviceNames = {
     tv: "Ofis TV'si",
     fan: "Havalandirma Fani",
@@ -31,12 +23,10 @@ const deviceNames = {
     coffee: "Ofis Kahve Makinesi",
 };
 
-// MQTT bağlantı ayarları
 const MQTT_CONFIG = {
     host: "broker.hivemq.com",
-    port: 8000,
-    useSSL: false,
-    // Sayfa her yenilendiğinde farklı bir client id üretilir (çakışmayı önler)
+    port: 8884,
+    useSSL: true,
     clientId: "dhl_m2x_monitor_" + Math.random().toString(16).slice(2, 8),
     baseTopic: "lojistik",
     reconnectDelayMs: 5000,
@@ -44,104 +34,142 @@ const MQTT_CONFIG = {
 
 const MAX_LOG_ROWS = 50;
 const NOTIFICATION_VISIBLE_MS = 3000;
-
-// Depo anahtarları (HTML'deki card-<key> / door-<key> id'leriyle eşleşir)
 const DEPOT_KEYS = ["esenyurt", "gebze", "tuzla", "orhanli", "hadimkoy"];
 
-// Otonom sensör simülasyonu ayarları (gerçek MQTT verisi gelene kadar devrede)
 const SIMULATION_CONFIG = {
-    tickMs: 4000,       // her kaç ms'de bir yeni değer üretilecek
+    tickMs: 4000,
     tempMin: 16, tempMax: 29,
     humMin: 28, humMax: 72,
-    tempStepMax: 0.5,   // her adımda sıcaklığın değişebileceği en fazla miktar
-    humStepMax: 2.5,    // her adımda nemin değişebileceği en fazla miktar
-    doorOpenChance: 0.03,   // kapı bir adımda açılma olasılığı
-    doorAutoCloseTicks: 2,  // kapı kaç adım sonra kendiliğinden kapansın
+    tempStepMax: 0.5,
+    humStepMax: 2.5,
+    doorOpenChance: 0.03,
+    doorAutoCloseTicks: 2,
 };
+
+const ALARM_THRESHOLDS = {
+    tempMin: 10,
+    tempMax: 27,
+    humMin: 20,
+    humMax: 75,
+};
+
+const LOGIN_LOCKOUT_CONFIG = {
+    maxAttempts: 5,
+    lockoutMs: 30000,
+};
+
+const HISTORY_MAX_POINTS = 20;
 
 // ============================================================
 // UYGULAMA DURUMU (STATE)
 // ============================================================
 
-let currentUser = null;      // { name, role } | null
-let selectedDepotKey = null; // Kroki modalında açık olan deponun anahtarı
+let currentUser = null;
+let selectedDepotKey = null;
 let mqttClient = null;
+let isSimulationActive = true;
 
-// Her depo için simülasyon durumu; ilgili depodan gerçek MQTT verisi
-// geldiği an "live: true" yapılır ve o depo artık simüle edilmez.
+let totalPackagesProcessed = 1240; // KPI Simule Paket Sayaci
+
 const depotSimState = {};
+const depotAlarmState = {};
+const depotHistory = {};
+
+let loginFailCount = 0;
+let loginLockedUntil = 0;
+let historyChart = null;
 
 // ============================================================
-// BAŞLANGIÇ
+// BASLANGIC
 // ============================================================
 
 document.addEventListener("DOMContentLoaded", () => {
     initMqttClient();
     initSensorSimulation();
+    updateKPICards();
     addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-logout");
 });
 
 // ============================================================
-// GİRİŞ / ÇIKIŞ İŞLEMLERİ
+// YARDIMCI: SIFRE HASH'LEME & GENEL YARDIMCILAR
 // ============================================================
 
-/**
- * Login formu gönderildiğinde çalışır; seçilen host kullanıcısının
- * şifresini doğrular.
- */
-function handleLogin(event) {
+async function sha256Hex(text) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function toggleTheme() {
+    document.body.classList.toggle("dark-mode");
+    const isDark = document.body.classList.contains("dark-mode");
+    document.getElementById("theme-btn").innerText = isDark ? "☀️ Gündüz Modu" : "🌙 Gece Modu";
+}
+
+// ============================================================
+// GIRIS / CIKIS ISLEMLERI
+// ============================================================
+
+async function handleLogin(event) {
     event.preventDefault();
+    const errorEl = document.getElementById("login-error");
+
+    const now = Date.now();
+    if (now < loginLockedUntil) {
+        const remainingSec = Math.ceil((loginLockedUntil - now) / 1000);
+        errorEl.innerText = `Cok fazla hatali deneme. Lutfen ${remainingSec} saniye sonra tekrar deneyin.`;
+        return;
+    }
 
     const userKey = document.getElementById("username-select").value;
     const inputPass = document.getElementById("password-input").value.trim();
-    const errorEl = document.getElementById("login-error");
     const selectedUser = hostUsers[userKey];
+    const inputHash = await sha256Hex(inputPass);
 
-    if (selectedUser && selectedUser.pass === inputPass) {
+    if (selectedUser && selectedUser.passHash === inputHash) {
+        loginFailCount = 0;
         currentUser = { name: selectedUser.name, role: "HOST" };
         completeLogin();
         return;
     }
 
-    errorEl.innerText = "Hatali sifre! Lutfen tekrar deneyiniz.";
-    addAuditLog(
-        "GIRIS HATASI",
-        selectedUser ? selectedUser.name : userKey,
-        "Hatali sifre denemesi",
-        "log-type-deny"
-    );
+    loginFailCount += 1;
+    addAuditLog("GIRIS HATASI", selectedUser ? selectedUser.name : userKey, `Hatali sifre denemesi (${loginFailCount}/${LOGIN_LOCKOUT_CONFIG.maxAttempts})`, "log-type-deny");
+
+    if (loginFailCount >= LOGIN_LOCKOUT_CONFIG.maxAttempts) {
+        loginLockedUntil = Date.now() + LOGIN_LOCKOUT_CONFIG.lockoutMs;
+        loginFailCount = 0;
+        const lockSec = LOGIN_LOCKOUT_CONFIG.lockoutMs / 1000;
+        errorEl.innerText = `Cok fazla hatali deneme! Giris ${lockSec} saniye icin kilitlendi.`;
+        addAuditLog("GUVENLIK", selectedUser ? selectedUser.name : userKey, `Ust uste hatali giris nedeniyle ${lockSec} saniye kilitlendi`, "log-type-alarm");
+    } else {
+        errorEl.innerText = "Hatali sifre! Lutfen tekrar deneyiniz.";
+    }
 }
 
-/** Misafir (sadece izleme) girişi. */
 function loginAsGuest() {
     currentUser = { name: "Guvenlik Gorevlisi", role: "GUEST" };
     completeLogin();
 }
 
-/** Giriş başarılı olduktan sonra ortak arayüz güncellemeleri. */
 function completeLogin() {
     document.getElementById("login-overlay").style.display = "none";
     document.getElementById("login-error").innerText = "";
     document.getElementById("password-input").value = "";
 
     document.getElementById("active-user-name").innerText = currentUser.name;
-    document.getElementById("last-login-user").innerText =
-        `${currentUser.name} (${currentUser.role})`;
+    document.getElementById("last-login-user").innerText = `${currentUser.name} (${currentUser.role})`;
 
     const roleEl = document.getElementById("active-user-role");
     const isHost = currentUser.role === "HOST";
     roleEl.innerText = isHost ? "HOST / ADMIN" : "GUVENLIK (MISAFIR)";
     roleEl.className = `role-tag ${isHost ? "role-host" : "role-guest"}`;
 
-    addAuditLog(
-        "Giris Portali",
-        `${currentUser.name} [${currentUser.role}]`,
-        "Sisteme basariyla oturum acildi",
-        "log-type-login"
-    );
+    addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme basariyla oturum acildi", "log-type-login");
 }
 
-/** Oturumu kapatır ve login ekranına geri döner. */
 function logout() {
     if (currentUser) {
         addAuditLog("Giris Portali", currentUser.name, "Oturum kapatildi", "log-type-logout");
@@ -151,16 +179,11 @@ function logout() {
 }
 
 // ============================================================
-// MQTT BAĞLANTI YÖNETİMİ
+// MQTT BAGLANTI YONETIMI
 // ============================================================
 
-/** MQTT istemcisini oluşturur, olay dinleyicilerini bağlar ve bağlanır. */
 function initMqttClient() {
-    mqttClient = new Paho.MQTT.Client(
-        MQTT_CONFIG.host,
-        Number(MQTT_CONFIG.port),
-        MQTT_CONFIG.clientId
-    );
+    mqttClient = new Paho.MQTT.Client(MQTT_CONFIG.host, Number(MQTT_CONFIG.port), MQTT_CONFIG.clientId);
 
     mqttClient.onMessageArrived = onMessageArrived;
     mqttClient.onConnectionLost = (response) => {
@@ -184,10 +207,6 @@ function initMqttClient() {
     });
 }
 
-/**
- * Gelen her MQTT mesajını işler.
- * Beklenen topic yapısı: lojistik/<depoAdi>/<olcumTuru>
- */
 function onMessageArrived(message) {
     const parts = message.destinationName.split("/");
     if (parts.length < 3 || parts[0] !== MQTT_CONFIG.baseTopic) return;
@@ -195,11 +214,13 @@ function onMessageArrived(message) {
     const [, depotKey, type] = parts;
     const payload = message.payloadString;
 
-    // Bu depodan gerçek bir sensör verisi geldi; artık bu depo için
-    // otonom simülasyonu durdurup gerçek veriyi esas alıyoruz.
+    if (typeof payload !== "string" || payload.length > 32) return;
+
     markDepotAsLive(depotKey);
 
     updateQuickUI(depotKey, type, payload);
+    checkThresholds(depotKey, type, payload);
+    recordHistory(depotKey, type, payload);
 
     if (selectedDepotKey === depotKey) {
         updateModalUI(type, payload);
@@ -208,9 +229,10 @@ function onMessageArrived(message) {
     if (type === "door" && payload.toUpperCase() === "OPEN") {
         addAuditLog(depotKey.toUpperCase(), "Sensor Alarmi", "KAPILAR ACILDI!", "log-type-alarm");
     }
+
+    updateKPICards();
 }
 
-/** Depo kartındaki hızlı özet bilgileri (sıcaklık/nem/kapı) günceller. */
 function updateQuickUI(depotKey, type, value) {
     const card = document.getElementById(`card-${depotKey}`);
     if (!card) return;
@@ -227,9 +249,10 @@ function updateQuickUI(depotKey, type, value) {
     }
 }
 
-/** Kontrol komutunu ilgili cihazın "set" topic'ine yayınlar (yalnızca HOST). */
 function sendControl(device, state) {
     if (!selectedDepotKey || !currentUser || currentUser.role !== "HOST") return;
+    if (!deviceNames[device] || (state !== "ON" && state !== "OFF")) return;
+
     if (!mqttClient || !mqttClient.isConnected()) {
         addAuditLog(selectedDepotKey.toUpperCase(), currentUser.name, "HATA: MQTT baglantisi yok, komut gonderilemedi", "log-type-deny");
         return;
@@ -248,34 +271,241 @@ function sendControl(device, state) {
 }
 
 // ============================================================
-// OTONOM SENSÖR SİMÜLASYONU (CANLI VERİ GELENE KADAR)
+// KPI METRIKLERI VE CANLI HESAPLAMALAR (A.1)
 // ============================================================
 
-/**
- * Her depo için başlangıç sıcaklık/nem/kapı durumunu üretir ve
- * belirli aralıklarla rastgele yürüyüş (random walk) ile güncelleyen
- * zamanlayıcıyı başlatır. Amaç, gerçek bir MQTT sensör verisi
- * bağlanmadığı sürece panelin "--" boş görünmemesi, gerçekçi ve
- * otonom şekilde canlı gibi hareket etmesidir.
- */
+function updateKPICards() {
+    document.getElementById("kpi-total-packages").innerText = totalPackagesProcessed;
+
+    let totalTemp = 0;
+    let validTempCount = 0;
+    let totalAlarmCount = 0;
+
+    DEPOT_KEYS.forEach(key => {
+        const state = depotSimState[key];
+        if (state && state.temp) {
+            totalTemp += state.temp;
+            validTempCount++;
+        }
+        const alarm = depotAlarmState[key];
+        if (alarm && (alarm.tempAlarm || alarm.humAlarm)) {
+            totalAlarmCount++;
+        }
+    });
+
+    if (validTempCount > 0) {
+        document.getElementById("kpi-avg-temp").innerText = (totalTemp / validTempCount).toFixed(1) + " °C";
+    }
+
+    const alarmStatusEl = document.getElementById("kpi-alarm-status");
+    const alarmCountEl = document.getElementById("kpi-alarm-count");
+
+    if (totalAlarmCount > 0) {
+        alarmStatusEl.innerText = "ALARM VAR";
+        alarmStatusEl.className = "kpi-value status-alarm";
+        alarmCountEl.innerText = `${totalAlarmCount} Depoda Kritik Esik Asildi`;
+    } else {
+        alarmStatusEl.innerText = "NORMAL";
+        alarmStatusEl.className = "kpi-value status-ok";
+        alarmCountEl.innerText = "Tum Eşikler Güvenli";
+    }
+}
+
+// ============================================================
+// SIMULASYON KONTROL ISLEMLERI (E.3)
+// ============================================================
+
+function triggerSimEvent(type) {
+    if (type === 'package') {
+        totalPackagesProcessed += Math.floor(Math.random() * 5) + 1;
+        updateKPICards();
+        addAuditLog("Simulasyon", "Operator", "Depolara yeni paket girisi simule edildi", "log-type-cmd");
+    } else if (type === 'alarm') {
+        const randomDepot = DEPOT_KEYS[Math.floor(Math.random() * DEPOT_KEYS.length)];
+        depotSimState[randomDepot].temp = 32.5; // Alarma dusur
+        applyDepotReading(randomDepot, depotSimState[randomDepot]);
+        addAuditLog(randomDepot.toUpperCase(), "Simulasyon Testi", "Yapay kritik sıcaklık alarmi tetiklendi!", "log-type-alarm");
+    } else if (type === 'door') {
+        const randomDepot = DEPOT_KEYS[Math.floor(Math.random() * DEPOT_KEYS.length)];
+        depotSimState[randomDepot].doorOpen = !depotSimState[randomDepot].doorOpen;
+        applyDepotReading(randomDepot, depotSimState[randomDepot]);
+        addAuditLog(randomDepot.toUpperCase(), "Simulasyon Testi", `Kapi durumu degistirildi`, "log-type-cmd");
+    } else if (type === 'toggle_sim') {
+        isSimulationActive = !isSimulationActive;
+        addAuditLog("Simulasyon", "Operator", `Otonom simulasyon ${isSimulationActive ? 'baslatildi' : 'durduruldu'}`, "log-type-login");
+    }
+}
+
+// ============================================================
+// ALARM ESIK KONTROLU
+// ============================================================
+
+function checkThresholds(depotKey, type, rawValue) {
+    if (type !== "temp" && type !== "hum") return;
+
+    if (!depotAlarmState[depotKey]) {
+        depotAlarmState[depotKey] = { tempAlarm: false, humAlarm: false };
+    }
+    const alarmState = depotAlarmState[depotKey];
+    const value = parseFloat(rawValue);
+    if (Number.isNaN(value)) return;
+
+    let isAlarm = false;
+    let alarmMsg = "";
+
+    if (type === "temp") {
+        isAlarm = value < ALARM_THRESHOLDS.tempMin || value > ALARM_THRESHOLDS.tempMax;
+        if (isAlarm !== alarmState.tempAlarm) {
+            alarmState.tempAlarm = isAlarm;
+            alarmMsg = isAlarm
+                ? `SICAKLIK ALARMI: ${value.toFixed(1)}°C (esik: ${ALARM_THRESHOLDS.tempMin}-${ALARM_THRESHOLDS.tempMax}°C)`
+                : `Sicaklik normale dondu: ${value.toFixed(1)}°C`;
+        }
+    } else {
+        isAlarm = value < ALARM_THRESHOLDS.humMin || value > ALARM_THRESHOLDS.humMax;
+        if (isAlarm !== alarmState.humAlarm) {
+            alarmState.humAlarm = isAlarm;
+            alarmMsg = isAlarm
+                ? `NEM ALARMI: %${Math.round(value)} (esik: %${ALARM_THRESHOLDS.humMin}-%${ALARM_THRESHOLDS.humMax})`
+                : `Nem normale dondu: %${Math.round(value)}`;
+        }
+    }
+
+    if (alarmMsg) {
+        addAuditLog(depotKey.toUpperCase(), "Esik Alarmi", alarmMsg, isAlarm ? "log-type-alarm" : "log-type-login");
+    }
+
+    applyCardStatusClass(depotKey);
+    updateKPICards();
+}
+
+function applyCardStatusClass(depotKey) {
+    const card = document.getElementById(`card-${depotKey}`);
+    if (!card) return;
+    const alarmState = depotAlarmState[depotKey];
+    const inAlarm = !!alarmState && (alarmState.tempAlarm || alarmState.humAlarm);
+    card.classList.toggle("card-alarm", inAlarm);
+}
+
+// ============================================================
+// GECMIS (TREND) VERISI VE GRAFIK
+// ============================================================
+
+function recordHistory(depotKey, type, rawValue) {
+    if (type !== "temp" && type !== "hum") return;
+    const value = parseFloat(rawValue);
+    if (Number.isNaN(value)) return;
+
+    if (!depotHistory[depotKey]) {
+        depotHistory[depotKey] = { labels: [], temp: [], hum: [] };
+    }
+    const hist = depotHistory[depotKey];
+
+    if (type === "temp") hist.temp.push(value);
+    if (type === "hum") hist.hum.push(value);
+
+    if (type === "temp") {
+        hist.labels.push(new Date().toTimeString().split(" ")[0]);
+        while (hist.labels.length > HISTORY_MAX_POINTS) {
+            hist.labels.shift();
+            hist.temp.shift();
+        }
+        while (hist.hum.length > HISTORY_MAX_POINTS) {
+            hist.hum.shift();
+        }
+    }
+
+    if (selectedDepotKey === depotKey) {
+        renderHistoryChart(depotKey);
+    }
+}
+
+function renderHistoryChart(depotKey) {
+    const canvas = document.getElementById("history-chart");
+    if (!canvas || typeof Chart === "undefined") return;
+
+    const hist = depotHistory[depotKey] || { labels: [], temp: [], hum: [] };
+
+    if (historyChart) {
+        historyChart.data.labels = hist.labels;
+        historyChart.data.datasets[0].data = hist.temp;
+        historyChart.data.datasets[1].data = hist.hum;
+        historyChart.update("none");
+        return;
+    }
+
+    historyChart = new Chart(canvas.getContext("2d"), {
+        type: "line",
+        data: {
+            labels: hist.labels,
+            datasets: [
+                {
+                    label: "Sicaklik (°C)",
+                    data: hist.temp,
+                    borderColor: "#D40511",
+                    backgroundColor: "rgba(212,5,17,0.08)",
+                    yAxisID: "yTemp",
+                    tension: 0.3,
+                    pointRadius: 0,
+                },
+                {
+                    label: "Nem (%)",
+                    data: hist.hum,
+                    borderColor: "#1971c2",
+                    backgroundColor: "rgba(25,113,194,0.08)",
+                    yAxisID: "yHum",
+                    tension: 0.3,
+                    pointRadius: 0,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: "index", intersect: false },
+            scales: {
+                yTemp: { type: "linear", position: "left", title: { display: true, text: "°C" } },
+                yHum: { type: "linear", position: "right", title: { display: true, text: "%" }, grid: { drawOnChartArea: false } },
+                x: { ticks: { maxTicksLimit: 6 } },
+            },
+            plugins: {
+                legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 10 } } },
+            },
+        },
+    });
+}
+
+function destroyHistoryChart() {
+    if (historyChart) {
+        historyChart.destroy();
+        historyChart = null;
+    }
+}
+
+// ============================================================
+// OTONOM SENSOR SIMULASYONU
+// ============================================================
+
 function initSensorSimulation() {
     DEPOT_KEYS.forEach((depotKey) => {
         depotSimState[depotKey] = {
-            live: false, // true olduğunda bu depo artık simüle edilmez
+            live: false,
             temp: randomInRange(19, 25),
             hum: randomInRange(40, 60),
             doorOpen: false,
             doorTicksLeft: 0,
         };
-        // Sayfa ilk açıldığında kartlar "--" beklemeden değer göstersin
         applyDepotReading(depotKey, depotSimState[depotKey]);
+        updateLiveBadge(depotKey, false);
     });
 
     setInterval(stepSimulation, SIMULATION_CONFIG.tickMs);
 }
 
-/** Tüm depoları bir adım ileri götürür (canlı veri gelenler hariç). */
 function stepSimulation() {
+    if (!isSimulationActive) return;
+
     DEPOT_KEYS.forEach((depotKey) => {
         const state = depotSimState[depotKey];
         if (!state || state.live) return;
@@ -294,14 +524,16 @@ function stepSimulation() {
         updateDoorSimState(depotKey, state);
         applyDepotReading(depotKey, state);
     });
+
+    totalPackagesProcessed += Math.floor(Math.random() * 2);
+    updateKPICards();
 }
 
-/** Kapı durumunu olasılıksal olarak günceller; açıksa birkaç adım sonra kapatır. */
 function updateDoorSimState(depotKey, state) {
     if (!state.doorOpen && Math.random() < SIMULATION_CONFIG.doorOpenChance) {
         state.doorOpen = true;
         state.doorTicksLeft = SIMULATION_CONFIG.doorAutoCloseTicks;
-        addAuditLog(depotKey.toUpperCase(), "Sensor Alarmi", "KAPILAR ACILDI! (otonom simülasyon)", "log-type-alarm");
+        addAuditLog(depotKey.toUpperCase(), "Sensor Alarmi", "KAPILAR ACILDI! (otonom simulasyon)", "log-type-alarm");
     } else if (state.doorOpen) {
         state.doorTicksLeft -= 1;
         if (state.doorTicksLeft <= 0) {
@@ -310,7 +542,6 @@ function updateDoorSimState(depotKey, state) {
     }
 }
 
-/** Üretilen değerleri gerçek MQTT mesajıymış gibi arayüze uygular. */
 function applyDepotReading(depotKey, state) {
     const tempStr = state.temp.toFixed(1);
     const humStr = Math.round(state.hum).toString();
@@ -320,6 +551,11 @@ function applyDepotReading(depotKey, state) {
     updateQuickUI(depotKey, "hum", humStr);
     updateQuickUI(depotKey, "door", doorStr);
 
+    checkThresholds(depotKey, "temp", tempStr);
+    checkThresholds(depotKey, "hum", humStr);
+    recordHistory(depotKey, "temp", tempStr);
+    recordHistory(depotKey, "hum", humStr);
+
     if (selectedDepotKey === depotKey) {
         updateModalUI("temp", tempStr);
         updateModalUI("hum", humStr);
@@ -327,35 +563,38 @@ function applyDepotReading(depotKey, state) {
     }
 }
 
-/** Bir depodan gerçek MQTT verisi geldiğinde o depoyu simülasyondan çıkarır. */
 function markDepotAsLive(depotKey) {
     const state = depotSimState[depotKey];
     if (state && !state.live) {
         state.live = true;
+        updateLiveBadge(depotKey, true);
         addAuditLog(depotKey.toUpperCase(), "Sistem", "Canli sensor verisi algilandi, simulasyon durduruldu", "log-type-login");
     }
 }
 
-/** min (dahil) ile max (dahil) arasında rastgele ondalıklı sayı üretir. */
-function randomInRange(min, max) {
-    return min + Math.random() * (max - min);
+function updateLiveBadge(depotKey, isLive) {
+    const badge = document.getElementById(`badge-${depotKey}`);
+    if (badge) {
+        badge.innerText = isLive ? "CANLI" : "SIMULASYON";
+        badge.className = `data-badge ${isLive ? "badge-live" : "badge-sim"}`;
+    }
+    if (selectedDepotKey === depotKey) {
+        const modalBadge = document.getElementById("modal-data-badge");
+        if (modalBadge) {
+            modalBadge.innerText = isLive ? "CANLI VERI" : "SIMULE VERI";
+            modalBadge.className = `data-badge ${isLive ? "badge-live" : "badge-sim"}`;
+        }
+    }
 }
 
-/** -maxStep ile +maxStep arasında rastgele bir adım büyüklüğü üretir. */
-function randomStep(maxStep) {
-    return (Math.random() * 2 - 1) * maxStep;
-}
-
-/** Değeri [min, max] aralığına sıkıştırır. */
-function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), max);
-}
+function randomInRange(min, max) { return min + Math.random() * (max - min); }
+function randomStep(maxStep) { return (Math.random() * 2 - 1) * maxStep; }
+function clamp(value, min, max) { return Math.min(Math.max(value, min), max); }
 
 // ============================================================
-// KROKİ / DETAY MODALI
+// KROKI / DETAY MODALI
 // ============================================================
 
-/** Depo kartına tıklanınca çağrılır; yetkiye göre kroki modalını açar. */
 function handleDepotClick(depotKey, title) {
     if (!currentUser) return;
 
@@ -380,13 +619,15 @@ function openDetails(depotKey, title) {
     document.getElementById("details-overlay").style.display = "flex";
     resetModalValues();
 
-    // Simüle edilen (henüz canlı MQTT verisi gelmemiş) depolar için
-    // modalı açar açmaz mevcut sıcaklık/nem değerlerini göster.
     const state = depotSimState[depotKey];
+    updateLiveBadge(depotKey, !!(state && state.live));
+
     if (state && !state.live) {
         updateModalUI("temp", state.temp.toFixed(1));
         updateModalUI("hum", Math.round(state.hum).toString());
     }
+
+    renderHistoryChart(depotKey);
 }
 
 function closeDetails() {
@@ -395,9 +636,9 @@ function closeDetails() {
     }
     selectedDepotKey = null;
     document.getElementById("details-overlay").style.display = "none";
+    destroyHistoryChart();
 }
 
-/** Modal içindeki sensör/cihaz görünümünü gelen veriyle günceller. */
 function updateModalUI(type, value) {
     const upperValue = value.toUpperCase();
     const isOn = upperValue === "ON";
@@ -425,7 +666,6 @@ function updateModalUI(type, value) {
     }
 }
 
-/** Modal her açıldığında değerleri varsayılan (bilinmiyor) haline sıfırlar. */
 function resetModalValues() {
     ["modal-temp", "modal-hum"].forEach((id) => {
         const el = document.getElementById(id);
@@ -447,14 +687,9 @@ function resetModalValues() {
 }
 
 // ============================================================
-// DENETİM (AUDIT) LOGLARI
+// DENETIM (AUDIT) LOGLARI VE FILTRELEME (C.2)
 // ============================================================
 
-/**
- * Log tablosuna yeni bir satır ekler. Değerler innerText/textContent
- * üzerinden yazılır; böylece log içeriğinde HTML/script enjeksiyonu
- * (XSS) riski oluşmaz.
- */
 function addAuditLog(location, user, action, cssClass = "") {
     const tbody = document.getElementById("log-tbody");
     if (!tbody) return;
@@ -482,6 +717,16 @@ function addAuditLog(location, user, action, cssClass = "") {
     }
 }
 
+function filterLogs() {
+    const query = document.getElementById("log-search").value.toLowerCase();
+    const rows = document.querySelectorAll("#log-tbody tr");
+
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(query) ? "" : "none";
+    });
+}
+
 function clearLogs() {
     const tbody = document.getElementById("log-tbody");
     if (!tbody) return;
@@ -490,11 +735,44 @@ function clearLogs() {
     addAuditLog("Sistem", currentUser ? currentUser.name : "Sistem", "Log gecmisi temizlendi", "log-type-logout");
 }
 
+function exportLogsToCsv() {
+    const tbody = document.getElementById("log-tbody");
+    if (!tbody || tbody.rows.length === 0) {
+        alert("Disa aktarilacak log kaydi yok.");
+        return;
+    }
+
+    const header = ["Saat", "Kullanici/Rol", "Depo/Konum", "Islem/Etkinlik"];
+    const csvRows = [header.join(";")];
+
+    Array.from(tbody.rows).forEach((row) => {
+        const cells = Array.from(row.cells).map((cell) => {
+            const text = cell.textContent.replace(/"/g, '""');
+            return `"${text}"`;
+        });
+        csvRows.push(cells.join(";"));
+    });
+
+    const csvContent = "\uFEFF" + csvRows.join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    link.href = url;
+    link.download = `dhl-m2x-audit-log-${timestamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    addAuditLog("Sistem", currentUser ? currentUser.name : "Sistem", "Audit log CSV olarak disa aktarildi", "log-type-view");
+}
+
 // ============================================================
-// BİLDİRİMLER
+// BILDIRIMLER
 // ============================================================
 
-/** Ekranın sağ üstünde geçici bir "cihaz açıldı/kapatıldı" bildirimi gösterir. */
 function showUserNotification(user, depotKey, device, state) {
     const area = document.getElementById("notification-area");
     const depotName = depotKey.charAt(0).toUpperCase() + depotKey.slice(1);
@@ -521,7 +799,6 @@ function showUserNotification(user, depotKey, device, state) {
 
     area.appendChild(box);
 
-    // Giriş animasyonunun tetiklenmesi için bir sonraki frame'de class eklenir
     requestAnimationFrame(() => box.classList.add("show"));
 
     setTimeout(() => {
@@ -530,7 +807,6 @@ function showUserNotification(user, depotKey, device, state) {
     }, NOTIFICATION_VISIBLE_MS);
 }
 
-/** Üst banttaki MQTT bağlantı durumu rozetini günceller. */
 function updateMqttStatus(isOnline) {
     const statusEl = document.getElementById("mqtt-status");
     statusEl.innerText = isOnline ? "MQTT: BAGLANDI" : "MQTT: BAGLANTI YOK";

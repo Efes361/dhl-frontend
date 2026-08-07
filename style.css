@@ -10,6 +10,18 @@
     --border-light: #DEE2E6;
     --safe-green: #28A745;
     --alarm-red: #DC3545;
+    --warn-orange: #FD7E14;
+    --card-bg: #FFFFFF;
+    --input-bg: #FFFFFF;
+}
+
+/* Karanlık Tema Sınıfı */
+body.dark-mode {
+    --soft-bg: #1e1e24;
+    --text-dark: #f1f1f1;
+    --border-light: #333339;
+    --card-bg: #2b2b36;
+    --input-bg: #383845;
 }
 
 * {
@@ -26,9 +38,10 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    transition: background-color 0.3s, color 0.3s;
 }
 
-/* Klavye ile gezinen kullanıcılar için görünür odak (erişilebilirlik) */
+/* Klavye ile gezinen kullanıcılar için görünür odak */
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
@@ -50,7 +63,8 @@ select:focus-visible,
 }
 
 .login-card {
-    background: white;
+    background: var(--card-bg);
+    color: var(--text-dark);
     width: 400px;
     max-width: 92vw;
     padding: 30px;
@@ -60,12 +74,6 @@ select:focus-visible,
     text-align: center;
 }
 
-.login-header {
-    margin-bottom: 10px;
-}
-
-/* Giriş ekranındaki DHL logosu, üst banttaki sarı zemin/kırmızı yazı
-   görünümüyle eşleşsin diye sarı bir rozet içine alınıyor. */
 .login-header .dhl-logo {
     display: inline-block;
     background: var(--dhl-yellow);
@@ -76,7 +84,7 @@ select:focus-visible,
 
 .login-header h2 {
     font-size: 1.1rem;
-    color: #495057;
+    color: var(--text-dark);
     margin-bottom: 20px;
 }
 
@@ -90,13 +98,14 @@ select:focus-visible,
     font-size: 0.85rem;
     font-weight: bold;
     margin-bottom: 5px;
-    color: #333;
 }
 
 .login-input {
     width: 100%;
     padding: 10px;
-    border: 1px solid #ced4da;
+    border: 1px solid var(--border-light);
+    background: var(--input-bg);
+    color: var(--text-dark);
     border-radius: 6px;
     font-size: 0.9rem;
     outline: none;
@@ -142,11 +151,11 @@ select:focus-visible,
     position: absolute;
     top: 50%; left: 0; width: 100%;
     height: 1px;
-    background: #e0e0e0;
+    background: var(--border-light);
 }
 
 .login-divider span {
-    background: white;
+    background: var(--card-bg);
     padding: 0 10px;
     position: relative;
     font-size: 0.75rem;
@@ -213,11 +222,23 @@ header {
     gap: 15px;
 }
 
+.btn-theme-toggle {
+    background: #333;
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 15px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
 .user-badge {
     display: flex;
     align-items: center;
     gap: 8px;
     background: white;
+    color: black;
     padding: 4px 12px;
     border-radius: 20px;
     border: 1px solid var(--dhl-red);
@@ -258,10 +279,47 @@ header {
     flex-direction: column;
     flex: 1;
     padding: 20px 40px;
-    gap: 20px;
+    gap: 15px;
     overflow-y: auto;
 }
 
+/* KPI Kart Paneli */
+.kpi-container {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    flex-shrink: 0;
+}
+
+.kpi-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 12px 18px;
+    border-left: 4px solid var(--dhl-red);
+}
+
+.kpi-title {
+    font-size: 0.75rem;
+    font-weight: bold;
+    color: #777;
+}
+
+.kpi-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin: 4px 0;
+}
+
+.kpi-sub {
+    font-size: 0.7rem;
+    color: #999;
+}
+
+.status-ok { color: var(--safe-green); }
+.status-alarm { color: var(--alarm-red); }
+
+/* Depo Grid */
 .depot-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -270,7 +328,7 @@ header {
 }
 
 .depot-card {
-    background: white;
+    background: var(--card-bg);
     border: 1px solid var(--border-light);
     border-radius: 8px;
     padding: 15px;
@@ -281,20 +339,58 @@ header {
 
 .depot-card:hover {
     transform: translateY(-3px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
     border-color: var(--dhl-yellow);
+}
+
+.depot-card.card-alarm {
+    border-color: var(--alarm-red);
+    border-width: 2px;
+    background: rgba(220, 53, 69, 0.05);
+    animation: card-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes card-pulse {
+    50% { box-shadow: 0 0 0 4px rgba(220, 53, 69, 0.12); }
 }
 
 .depot-card h3 {
     font-size: 1.1rem;
-    color: #000;
     margin-bottom: 2px;
 }
 
 .depot-card p {
     font-size: 0.8rem;
-    color: #666;
+    color: #777;
     margin-bottom: 10px;
+}
+
+.data-badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: bold;
+    padding: 2px 7px;
+    border-radius: 10px;
+    letter-spacing: 0.3px;
+}
+
+.badge-live {
+    background: #E6FCF5;
+    color: #0CA678;
+    border: 1px solid #0CA678;
+}
+
+.badge-sim {
+    background: #FFF9DB;
+    color: #A17B00;
+    border: 1px solid #E8C200;
+}
+
+.card-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 6px;
 }
 
 .quick-metrics {
@@ -302,7 +398,6 @@ header {
     justify-content: space-between;
     font-size: 0.9rem;
     font-weight: bold;
-    color: #333;
 }
 
 .door-tag {
@@ -325,17 +420,43 @@ header {
 
 @keyframes flash { 50% { opacity: 0.6; } }
 
-/* --- ALT PANEL VE LOG TABLOSU --- */
+/* Simülasyon Kontrol Paneli */
+.sim-control-box {
+    padding: 10px 20px;
+}
+
+.sim-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 5px;
+    flex-wrap: wrap;
+}
+
+.btn-sim-act {
+    background: #e9ecef;
+    border: 1px solid #ced4da;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-sim-act:hover { background: #dee2e6; }
+.btn-sim-danger { color: var(--alarm-red); border-color: var(--alarm-red); }
+
+/* ALT PANEL VE LOG TABLOSU */
 .bottom-sections {
     display: grid;
     grid-template-columns: 2.2fr 1fr;
     gap: 20px;
     flex: 1;
-    min-height: 260px;
+    min-height: 240px;
 }
 
 .panel-box {
-    background: white;
+    background: var(--card-bg);
     border: 1px solid var(--border-light);
     border-radius: 8px;
     padding: 15px 20px;
@@ -355,7 +476,21 @@ header {
     align-items: center;
 }
 
-.btn-clear-log {
+.panel-header-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.log-search-input {
+    padding: 3px 8px;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-light);
+    background: var(--input-bg);
+    color: var(--text-dark);
+    border-radius: 4px;
+}
+
+.btn-clear-log, .btn-export-csv {
     background: #e9ecef;
     border: 1px solid #ced4da;
     padding: 2px 8px;
@@ -363,9 +498,14 @@ header {
     font-size: 0.75rem;
     cursor: pointer;
     font-weight: bold;
+    color: #333;
 }
 
-.btn-clear-log:hover { background: #dee2e6; }
+.btn-export-csv {
+    background: #E6FCF5;
+    border-color: #0CA678;
+    color: #0CA678;
+}
 
 .log-table {
     width: 100%;
@@ -375,17 +515,16 @@ header {
 
 .log-table th {
     text-align: left;
-    color: #495057;
-    background: #f8f9fa;
+    background: rgba(0,0,0,0.03);
     padding: 6px 8px;
-    border-bottom: 2px solid #dee2e6;
+    border-bottom: 2px solid var(--border-light);
     position: sticky;
     top: 0;
 }
 
 .log-table td {
     padding: 7px 8px;
-    border-bottom: 1px solid #F1F3F5;
+    border-bottom: 1px solid var(--border-light);
 }
 
 .log-type-login { color: #2b8a3e; font-weight: bold; }
@@ -393,18 +532,18 @@ header {
 .log-type-view { color: #1971c2; font-weight: bold; }
 .log-type-cmd { color: #d9480f; font-weight: bold; }
 .log-type-alarm { color: #c92a2a; font-weight: bold; }
-.log-type-deny { color: #e03131; background: #fff5f5; font-weight: bold; }
+.log-type-deny { color: #e03131; font-weight: bold; }
 
 .info-row {
     display: flex;
     justify-content: space-between;
     font-size: 0.88rem;
     padding: 8px 0;
-    border-bottom: 1px solid #F1F3F5;
+    border-bottom: 1px solid var(--border-light);
 }
 
-.info-label { color: #666; }
-.info-value { font-weight: bold; color: #000; }
+.info-label { color: #777; }
+.info-value { font-weight: bold; }
 
 /* --- KROKİ MODALI --- */
 #details-overlay {
@@ -419,7 +558,8 @@ header {
 }
 
 .details-box {
-    background: white;
+    background: var(--card-bg);
+    color: var(--text-dark);
     border-radius: 8px;
     width: 90%;
     max-width: 1000px;
@@ -460,7 +600,6 @@ header {
     padding: 25px;
     gap: 20px;
     flex: 1;
-    overflow: hidden;
     overflow-y: auto;
 }
 
@@ -471,38 +610,6 @@ header {
     gap: 10px;
     min-width: 260px;
 }
-
-.kroki-label {
-    font-size: 0.9rem;
-    font-weight: bold;
-    color: #333;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-
-.kroki-legend {
-    font-size: 0.75rem;
-    font-weight: normal;
-    color: #666;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.legend-dot {
-    display: inline-block;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    margin-left: 8px;
-    margin-right: 2px;
-}
-
-.legend-dot.legend-on { background: var(--safe-green); }
-.legend-dot.legend-off { background: var(--alarm-red); }
 
 .kroki-area {
     background: #F1F3F5;
@@ -517,11 +624,23 @@ header {
     justify-content: center;
 }
 
-.kroki-image {
+.floorplan-svg {
     width: 100%;
     height: 100%;
-    object-fit: contain;
     background: white;
+}
+
+.floorplan-svg .room-outline { fill: #FAFAFA; stroke: #ADB5BD; stroke-width: 3; }
+.floorplan-svg .door-shape { fill: var(--safe-green); transition: fill 0.2s; }
+.floorplan-svg .door-shape.door-open-w { fill: var(--alarm-red); }
+.floorplan-svg .device-icon { transition: fill 0.2s; }
+.floorplan-svg .device-icon.device-on { fill: var(--safe-green); }
+.floorplan-svg .device-icon.device-off { fill: #ADB5BD; }
+.floorplan-svg .device-label { font-size: 10px; fill: #495057; font-weight: bold; }
+
+.history-chart-wrap {
+    height: 170px;
+    position: relative;
 }
 
 .control-pane {
@@ -530,36 +649,34 @@ header {
     flex-direction: column;
     gap: 15px;
     flex-shrink: 0;
-    overflow-y: auto;
 }
 
 .sensor-group {
-    background: #F8F9FA;
-    padding: 15px;
+    background: rgba(0,0,0,0.02);
+    padding: 12px;
     border-radius: 6px;
     border: 1px solid var(--border-light);
 }
 
 .group-title {
     font-weight: bold;
-    margin-bottom: 10px;
-    border-bottom: 1px solid #DEE2E6;
-    padding-bottom: 5px;
-    font-size: 0.95rem;
-    color: #000;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 4px;
+    font-size: 0.85rem;
 }
 
 .ctrl-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
-    font-size: 0.9rem;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
 }
 
 .status-text {
     font-weight: bold;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     padding: 2px 6px;
     border-radius: 3px;
 }
@@ -570,21 +687,16 @@ header {
 .btn-group { display: flex; gap: 5px; }
 
 .btn-ctrl {
-    padding: 4px 10px;
+    padding: 3px 8px;
     border: 1px solid #CED4DA;
     border-radius: 4px;
     font-weight: bold;
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     background: white;
-    transition: background 0.2s;
 }
 
-.btn-ctrl:hover { background: #F1F3F5; }
-.btn-on-act:hover { background: #E6FCF5; color: var(--safe-green); border-color: var(--safe-green); }
-.btn-off-act:hover { background: #FFF5F5; color: var(--alarm-red); border-color: var(--alarm-red); }
-
-/* --- BİLDİRİM KUTUSU --- */
+/* BİLDİRİM KUTUSU */
 #notification-area {
     position: fixed;
     top: 70px;
@@ -593,7 +705,6 @@ header {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    max-width: 90vw;
 }
 
 .notify-box {
@@ -602,45 +713,23 @@ header {
     padding: 12px 20px;
     border-radius: 6px;
     font-size: 0.85rem;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
     border-left: 4px solid var(--dhl-yellow);
     transform: translateX(120%);
     transition: transform 0.3s ease-out;
 }
 
 .notify-box.show { transform: translateX(0); }
-.notify-user { color: var(--dhl-yellow); font-weight: bold; }
-.notify-action { font-weight: bold; }
 
-/* --- KÜÇÜK EKRANLAR İÇİN DUYARLI (RESPONSIVE) DÜZEN --- */
+/* DUYARLILIK (RESPONSIVE) */
 @media (max-width: 1100px) {
-    .depot-grid {
-        grid-template-columns: repeat(3, 1fr);
-    }
-
-    .bottom-sections {
-        grid-template-columns: 1fr;
-    }
-
-    .details-content {
-        flex-direction: column;
-    }
-
-    .control-pane {
-        width: 100%;
-    }
+    .kpi-container { grid-template-columns: repeat(2, 1fr); }
+    .depot-grid { grid-template-columns: repeat(3, 1fr); }
+    .bottom-sections { grid-template-columns: 1fr; }
+    .details-content { flex-direction: column; }
+    .control-pane { width: 100%; }
 }
 
 @media (max-width: 640px) {
-    header {
-        padding: 10px 16px;
-    }
-
-    #main-content {
-        padding: 16px;
-    }
-
-    .depot-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
+    .kpi-container { grid-template-columns: 1fr; }
+    .depot-grid { grid-template-columns: repeat(2, 1fr); }
 }
