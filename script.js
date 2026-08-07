@@ -79,6 +79,10 @@ let loginFailCount = 0;
 let loginLockedUntil = 0;
 let historyChart = null;
 
+// Alarm sesi icin AudioContext (dosya kullanilmaz, ses tamamen kod ile uretilir)
+let alarmAudioCtx = null;
+let alarmSoundMuted = false;
+
 // ============================================================
 // BASLANGIC
 // ============================================================
@@ -155,6 +159,11 @@ function loginAsGuest() {
 }
 
 function completeLogin() {
+    // Giris bir kullanici tiklamasi oldugu icin AudioContext'i burada
+    // "isitiyoruz" - boylece ilerideki otomatik alarm sesleri tarayicinin
+    // otomatik-oynatma (autoplay) kisitlamasina takilmaz.
+    getAlarmAudioCtx();
+
     document.getElementById("login-overlay").style.display = "none";
     document.getElementById("login-error").innerText = "";
     document.getElementById("password-input").value = "";
@@ -228,6 +237,7 @@ function onMessageArrived(message) {
 
     if (type === "door" && payload.toUpperCase() === "OPEN") {
         addAuditLog(depotKey.toUpperCase(), "Sensor Alarmi", "KAPILAR ACILDI!", "log-type-alarm");
+        playAlarmSiren();
     }
 
     updateKPICards();
@@ -337,6 +347,91 @@ function triggerSimEvent(type) {
 }
 
 // ============================================================
+// ALARM SESI (TAMAMEN KOD ILE URETILEN SIREN - MP3/WAV DOSYASI YOK)
+// ============================================================
+
+/**
+ * AudioContext'i tembel (lazy) sekilde olusturur/dondurur. Tarayicilar
+ * otomatik ses calmayi kisitladigi icin context, ancak bir kullanici
+ * etkilesiminden (tiklama vb.) sonra "resume" edilebilir.
+ */
+function getAlarmAudioCtx() {
+    if (!alarmAudioCtx) {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return null;
+        alarmAudioCtx = new AudioCtx();
+    }
+    if (alarmAudioCtx.state === "suspended") {
+        alarmAudioCtx.resume();
+    }
+    return alarmAudioCtx;
+}
+
+/**
+ * Klasik iki tonlu (Avrupa tipi) siren efektini sentezler ve calar.
+ * Hicbir ses dosyasina ihtiyac duymaz; frekansi zamanla salinan bir
+ * osilator + kazanc (gain) zarfi kullanilir.
+ */
+function playAlarmSiren(durationMs = 2200) {
+    if (alarmSoundMuted) return;
+
+    const ctx = getAlarmAudioCtx();
+    if (!ctx) return; // Tarayici Web Audio API'yi desteklemiyor
+
+    const now = ctx.currentTime;
+    const totalSec = durationMs / 1000;
+
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    osc.type = "sawtooth"; // Sirene benzer, sert/dikkat cekici bir tini
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    gainNode.gain.setValueAtTime(0, now);
+    gainNode.gain.linearRampToValueAtTime(0.28, now + 0.05);
+    gainNode.gain.setValueAtTime(0.28, now + totalSec - 0.15);
+    gainNode.gain.linearRampToValueAtTime(0, now + totalSec);
+
+    // Frekansi 500Hz <-> 900Hz arasinda ileri geri salinan bir "wail"
+    // deseni; her tam cevrim yaklasik 0.5 saniye surer.
+    const cycleSec = 0.5;
+    const cycles = Math.ceil(totalSec / cycleSec);
+    for (let i = 0; i <= cycles; i++) {
+        const t = now + i * cycleSec;
+        const freq = i % 2 === 0 ? 500 : 900;
+        osc.frequency.linearRampToValueAtTime(freq, t + cycleSec);
+    }
+
+    osc.start(now);
+    osc.stop(now + totalSec);
+}
+
+/** Test butonuna basildiginda cagrilir; hem sesi denemek hem de
+ * tarayicinin otomatik ses kisitlamasini bu kullanici etkilesimiyle
+ * "acmak" icin kullanilir. */
+function testAlarmSound() {
+    playAlarmSiren(2200);
+    addAuditLog("Sistem", currentUser ? currentUser.name : "Ziyaretci", "Alarm sesi test edildi", "log-type-view");
+}
+
+/** Header'daki hoparlor butonuyla alarm sesini ac/kapat (mute) yapar. */
+function toggleAlarmMute() {
+    alarmSoundMuted = !alarmSoundMuted;
+    const btn = document.getElementById("btn-alarm-mute");
+    if (btn) {
+        btn.innerText = alarmSoundMuted ? "🔇" : "🔊";
+        btn.title = alarmSoundMuted ? "Alarm Sesi Kapali (acmak icin tikla)" : "Alarm Sesi Acik (kapatmak icin tikla)";
+    }
+    addAuditLog(
+        "Sistem",
+        currentUser ? currentUser.name : "Ziyaretci",
+        alarmSoundMuted ? "Alarm sesi kapatildi" : "Alarm sesi acildi",
+        "log-type-view"
+    );
+}
+
+// ============================================================
 // ALARM ESIK KONTROLU
 // ============================================================
 
@@ -373,6 +468,7 @@ function checkThresholds(depotKey, type, rawValue) {
 
     if (alarmMsg) {
         addAuditLog(depotKey.toUpperCase(), "Esik Alarmi", alarmMsg, isAlarm ? "log-type-alarm" : "log-type-login");
+        if (isAlarm) playAlarmSiren();
     }
 
     applyCardStatusClass(depotKey);
@@ -534,6 +630,7 @@ function updateDoorSimState(depotKey, state) {
         state.doorOpen = true;
         state.doorTicksLeft = SIMULATION_CONFIG.doorAutoCloseTicks;
         addAuditLog(depotKey.toUpperCase(), "Sensor Alarmi", "KAPILAR ACILDI! (otonom simulasyon)", "log-type-alarm");
+        playAlarmSiren();
     } else if (state.doorOpen) {
         state.doorTicksLeft -= 1;
         if (state.doorTicksLeft <= 0) {

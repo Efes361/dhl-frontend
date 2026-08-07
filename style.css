@@ -233,6 +233,42 @@ header {
     font-weight: bold;
 }
 
+/* --- ALARM SESI TEST / AC-KAPA BUTONLARI --- */
+.btn-test-alarm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--alarm-red);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+}
+
+.btn-test-alarm:hover { background: #b5202f; }
+.btn-test-alarm:active { transform: scale(0.96); }
+
+.btn-alarm-mute {
+    background: var(--card-bg);
+    border: 1px solid var(--dhl-red);
+    color: var(--dhl-red);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 0.95rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.btn-alarm-mute:hover { background: rgba(220, 53, 69, 0.08); }
+
 .user-badge {
     display: flex;
     align-items: center;
