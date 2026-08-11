@@ -74,12 +74,14 @@ select:focus-visible,
     text-align: center;
 }
 
-.login-header .dhl-logo {
-    display: inline-block;
+.login-header .dhl-logo-img {
+    display: block;
+    margin: 0 auto 8px;
     background: var(--dhl-yellow);
     padding: 6px 22px;
     border-radius: 6px;
-    font-size: 2.4rem;
+    height: 64px;
+    width: auto;
 }
 
 .login-header h2 {
@@ -199,14 +201,15 @@ header {
     gap: 15px;
 }
 
-.dhl-logo {
-    color: var(--dhl-red);
-    font-size: 3rem;
-    font-style: italic;
-    font-weight: 900;
-    letter-spacing: -2px;
-    margin: 0;
-    line-height: 1;
+.dhl-logo-img {
+    height: 46px;
+    width: auto;
+    display: block;
+    border-radius: 4px;
+}
+
+.dhl-logo-img-header {
+    height: 46px;
 }
 
 .header-title {
