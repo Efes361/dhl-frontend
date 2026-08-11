@@ -8,14 +8,6 @@
 // SABITLER VE YAPILANDIRMA
 // ============================================================
 
-const hostUsers = {
-    abdullah: { name: "Abdullah Carkci", passHash: "" },
-    efe:      { name: "Enver Efe Timur", passHash: "" },
-    yusuf:    { name: "Yusuf Gungor",    passHash: "" },
-    harun:    { name: "Harun Kurt",      passHash: "" },
-    cem:      { name: "Cem",             passHash: "" },
-};
-
 const deviceNames = {
     tv: "Ofis TV'si",
     fan: "Havalandirma Fani",
@@ -55,7 +47,7 @@ const HISTORY_MAX_POINTS = 20;
 // UYGULAMA DURUMU (STATE)
 // ============================================================
 
-let currentUser = null;
+let currentUser = { name: "Abdullah Carkci", role: "HOST" };
 let selectedDepotKey = null;
 let mqttClient = null;
 
@@ -71,26 +63,18 @@ let alarmAudioCtx = null;
 let alarmSoundMuted = false;
 
 // ============================================================
-// BASLANGIC (SIFRESIZ DIREKT GIRIS)
+// BASLANGIC (SİFRE EKRANI TAMAMEN DEVRE DISI)
 // ============================================================
 
 document.addEventListener("DOMContentLoaded", () => {
-    initMqttClient();
-    initDepotState();
-    updateKPICards();
-    addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-logout");
+    // Giriş ekranı (Login Overlay) varsa tamamen sil/gizle
+    const loginOverlay = document.getElementById("login-overlay");
+    if (loginOverlay) {
+        loginOverlay.style.display = "none";
+        loginOverlay.remove(); // DOM'dan tamamen kaldırır
+    }
 
-    // Şifre sormadan otomatik olarak 'Abdullah Carkci' oturumu açılır
-    currentUser = { name: hostUsers.abdullah.name, role: "HOST" };
-    completeLogin();
-});
-
-function completeLogin() {
-    getAlarmAudioCtx();
-
-    const overlay = document.getElementById("login-overlay");
-    if (overlay) overlay.style.display = "none";
-
+    // Arayüzdeki kullanıcı bilgilerini ayarla
     const activeUserEl = document.getElementById("active-user-name");
     if (activeUserEl) activeUserEl.innerText = currentUser.name;
 
@@ -103,14 +87,17 @@ function completeLogin() {
         roleEl.className = "role-tag role-host";
     }
 
-    addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme basariyla oturum acildi", "log-type-login");
-}
+    getAlarmAudioCtx();
+    initMqttClient();
+    initDepotState();
+    updateKPICards();
+
+    addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-login");
+    addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme doğrudan oturum acildi", "log-type-login");
+});
 
 function logout() {
-    if (currentUser) {
-        addAuditLog("Giris Portali", currentUser.name, "Oturum kapatildi", "log-type-logout");
-    }
-    // Çıkış yapılsa dahi sayfayı yenileyip şifresiz otomatik tekrar girer
+    addAuditLog("Giris Portali", currentUser.name, "Oturum yenilendi", "log-type-logout");
     window.location.reload();
 }
 
@@ -222,7 +209,7 @@ function updateQuickUI(depotKey, type, value) {
 }
 
 function sendControl(device, state) {
-    if (!selectedDepotKey || !currentUser || currentUser.role !== "HOST") return;
+    if (!selectedDepotKey || !currentUser) return;
     if (!deviceNames[device] || (state !== "ON" && state !== "OFF")) return;
 
     if (!mqttClient || !mqttClient.isConnected()) {
