@@ -108,7 +108,7 @@
             <div class="depot-card" id="card-esenyurt" onclick="handleDepotClick('esenyurt', 'Esenyurt Lojistik M.')">
                 <div class="card-top-row">
                     <h3>ESENYURT</h3>
-                    <span id="badge-esenyurt" class="data-badge badge-sim">SIMULASYON</span>
+                    <span id="badge-esenyurt" class="data-badge badge-sim">VERI BEKLENIYOR</span>
                 </div>
                 <p>Istanbul Avrupa</p>
                 <div class="quick-metrics">
@@ -121,7 +121,7 @@
             <div class="depot-card" id="card-gebze" onclick="handleDepotClick('gebze', 'Gebze Lojistik M.')">
                 <div class="card-top-row">
                     <h3>GEBZE</h3>
-                    <span id="badge-gebze" class="data-badge badge-sim">SIMULASYON</span>
+                    <span id="badge-gebze" class="data-badge badge-sim">VERI BEKLENIYOR</span>
                 </div>
                 <p>Kocaeli / Marmara</p>
                 <div class="quick-metrics">
@@ -134,7 +134,7 @@
             <div class="depot-card" id="card-tuzla" onclick="handleDepotClick('tuzla', 'Tuzla (Asya 1) Lojistik M.')">
                 <div class="card-top-row">
                     <h3>TUZLA</h3>
-                    <span id="badge-tuzla" class="data-badge badge-sim">SIMULASYON</span>
+                    <span id="badge-tuzla" class="data-badge badge-sim">VERI BEKLENIYOR</span>
                 </div>
                 <p>Istanbul Anadolu</p>
                 <div class="quick-metrics">
@@ -147,7 +147,7 @@
             <div class="depot-card" id="card-orhanli" onclick="handleDepotClick('orhanli', 'Orhanli Lojistik M.')">
                 <div class="card-top-row">
                     <h3>ORHANLI</h3>
-                    <span id="badge-orhanli" class="data-badge badge-sim">SIMULASYON</span>
+                    <span id="badge-orhanli" class="data-badge badge-sim">VERI BEKLENIYOR</span>
                 </div>
                 <p>Istanbul Anadolu</p>
                 <div class="quick-metrics">
@@ -160,7 +160,7 @@
             <div class="depot-card" id="card-hadimkoy" onclick="handleDepotClick('hadimkoy', 'Hadimkoy Lojistik M.')">
                 <div class="card-top-row">
                     <h3>HADIMKOY</h3>
-                    <span id="badge-hadimkoy" class="data-badge badge-sim">SIMULASYON</span>
+                    <span id="badge-hadimkoy" class="data-badge badge-sim">VERI BEKLENIYOR</span>
                 </div>
                 <p>Istanbul Avrupa</p>
                 <div class="quick-metrics">
@@ -171,16 +171,14 @@
             </div>
         </div>
 
-        <!-- SIMULASYON KONTROL VE HIZLI TEST PANELI (E.3) -->
+        <!-- MANUEL TEST PANELI (Gercek ESP32/Wokwi verisi baglanmadan once test icin) -->
         <div class="panel-box sim-control-box">
             <div class="panel-header">
-                <span>⚡ CANLI SIMULASYON VE TEST KONTROL PANELI</span>
+                <span>🧪 MANUEL TEST KONTROL PANELI</span>
             </div>
             <div class="sim-controls">
                 <button class="btn-sim-act" onclick="triggerSimEvent('package')">📦 Paket Gonder</button>
-                <button class="btn-sim-act" onclick="triggerSimEvent('alarm')">🚨 Yapay Alarm Uret</button>
-                <button class="btn-sim-act" onclick="triggerSimEvent('door')">🚪 Kapı Ac/Kapat Simule Et</button>
-                <button class="btn-sim-act btn-sim-danger" onclick="triggerSimEvent('toggle_sim')">⏯️ Simulasyonu Durdur/Baslat</button>
+                <button class="btn-sim-act" onclick="triggerSimEvent('door')">🚪 Kapı Ac/Kapat Testi</button>
             </div>
         </div>
 
@@ -227,7 +225,7 @@
             <div class="details-header">
                 <div class="details-header-title">
                     <h2 id="modal-title">Depo Detayi</h2>
-                    <span id="modal-data-badge" class="data-badge badge-sim">SIMULE VERI</span>
+                    <span id="modal-data-badge" class="data-badge badge-sim">VERI BEKLENIYOR</span>
                 </div>
                 <button class="close-btn" onclick="closeDetails()" aria-label="Kapat">&times;</button>
             </div>

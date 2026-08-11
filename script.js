@@ -36,16 +36,6 @@ const MAX_LOG_ROWS = 50;
 const NOTIFICATION_VISIBLE_MS = 3000;
 const DEPOT_KEYS = ["esenyurt", "gebze", "tuzla", "orhanli", "hadimkoy"];
 
-const SIMULATION_CONFIG = {
-    tickMs: 4000,
-    tempMin: 16, tempMax: 29,
-    humMin: 28, humMax: 72,
-    tempStepMax: 0.5,
-    humStepMax: 2.5,
-    doorOpenChance: 0.03,
-    doorAutoCloseTicks: 2,
-};
-
 const ALARM_THRESHOLDS = {
     tempMin: 10,
     tempMax: 27,
@@ -74,9 +64,8 @@ const HISTORY_MAX_POINTS = 20;
 let currentUser = null;
 let selectedDepotKey = null;
 let mqttClient = null;
-let isSimulationActive = true;
 
-let totalPackagesProcessed = 1240; // KPI Simule Paket Sayaci
+let totalPackagesProcessed = 1240; // KPI Paket Sayaci
 
 const depotSimState = {};
 const depotAlarmState = {};
@@ -97,7 +86,7 @@ let alarmSoundMuted = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     initMqttClient();
-    initSensorSimulation();
+    initDepotState();
     updateKPICards();
     addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-logout");
 });
@@ -239,6 +228,17 @@ function onMessageArrived(message) {
     checkThresholds(depotKey, type, payload);
     recordHistory(depotKey, type, payload);
 
+    // KPI ortalamalarinin dogru hesaplanabilmesi icin son gelen gercek
+    // ESP32/Wokwi degerini de depo durumuna yaziyoruz.
+    if (depotSimState[depotKey]) {
+        if (type === "temp" || type === "hum") {
+            const numeric = parseFloat(payload);
+            if (!Number.isNaN(numeric)) depotSimState[depotKey][type] = numeric;
+        } else if (type === "door") {
+            depotSimState[depotKey].doorOpen = payload.toUpperCase() === "OPEN";
+        }
+    }
+
     if (selectedDepotKey === depotKey) {
         updateModalUI(type, payload);
     }
@@ -337,20 +337,12 @@ function triggerSimEvent(type) {
         totalPackagesProcessed += Math.floor(Math.random() * 5) + 1;
         updateKPICards();
         addAuditLog("Simulasyon", "Operator", "Depolara yeni paket girisi simule edildi", "log-type-cmd");
-    } else if (type === 'alarm') {
-        const randomDepot = DEPOT_KEYS[Math.floor(Math.random() * DEPOT_KEYS.length)];
-        depotSimState[randomDepot].temp = 32.5; // Alarma dusur
-        applyDepotReading(randomDepot, depotSimState[randomDepot]);
-        addAuditLog(randomDepot.toUpperCase(), "Simulasyon Testi", "Yapay kritik sıcaklık alarmi tetiklendi!", "log-type-alarm");
     } else if (type === 'door') {
         const randomDepot = DEPOT_KEYS[Math.floor(Math.random() * DEPOT_KEYS.length)];
         const newDoorState = !depotSimState[randomDepot].doorOpen;
         depotSimState[randomDepot].doorOpen = newDoorState;
         applyDepotReading(randomDepot, depotSimState[randomDepot]);
         handleDoorStateChange(randomDepot, newDoorState, "Simulasyon Testi");
-    } else if (type === 'toggle_sim') {
-        isSimulationActive = !isSimulationActive;
-        addAuditLog("Simulasyon", "Operator", `Otonom simulasyon ${isSimulationActive ? 'baslatildi' : 'durduruldu'}`, "log-type-login");
     }
 }
 
@@ -655,83 +647,46 @@ function destroyHistoryChart() {
 }
 
 // ============================================================
-// OTONOM SENSOR SIMULASYONU
+// DEPO DURUMU BASLATMA (ARTIK OTONOM DEGER URETIMI YOK)
 // ============================================================
+// ESP32 / Wokwi tarafindan MQTT uzerinden gonderilen gercek sicaklik,
+// nem ve kapi verileri gelene kadar kartlar "--" placeholder ile
+// bekler. Gercek veri geldiginde onMessageArrived() -> markDepotAsLive()
+// devreye girer ve kart "CANLI" rozetine gecer.
 
-function initSensorSimulation() {
+function initDepotState() {
     DEPOT_KEYS.forEach((depotKey) => {
         depotSimState[depotKey] = {
             live: false,
-            temp: randomInRange(19, 25),
-            hum: randomInRange(40, 60),
+            temp: null,
+            hum: null,
             doorOpen: false,
-            doorTicksLeft: 0,
         };
-        applyDepotReading(depotKey, depotSimState[depotKey]);
         updateLiveBadge(depotKey, false);
     });
-
-    setInterval(stepSimulation, SIMULATION_CONFIG.tickMs);
-}
-
-function stepSimulation() {
-    if (!isSimulationActive) return;
-
-    DEPOT_KEYS.forEach((depotKey) => {
-        const state = depotSimState[depotKey];
-        if (!state || state.live) return;
-
-        state.temp = clamp(
-            state.temp + randomStep(SIMULATION_CONFIG.tempStepMax),
-            SIMULATION_CONFIG.tempMin,
-            SIMULATION_CONFIG.tempMax
-        );
-        state.hum = clamp(
-            state.hum + randomStep(SIMULATION_CONFIG.humStepMax),
-            SIMULATION_CONFIG.humMin,
-            SIMULATION_CONFIG.humMax
-        );
-
-        updateDoorSimState(depotKey, state);
-        applyDepotReading(depotKey, state);
-    });
-
-    totalPackagesProcessed += Math.floor(Math.random() * 2);
-    updateKPICards();
-}
-
-function updateDoorSimState(depotKey, state) {
-    if (!state.doorOpen && Math.random() < SIMULATION_CONFIG.doorOpenChance) {
-        state.doorOpen = true;
-        state.doorTicksLeft = SIMULATION_CONFIG.doorAutoCloseTicks;
-        handleDoorStateChange(depotKey, true, "Otonom Simulasyon");
-    } else if (state.doorOpen) {
-        state.doorTicksLeft -= 1;
-        if (state.doorTicksLeft <= 0) {
-            state.doorOpen = false;
-            handleDoorStateChange(depotKey, false, "Otonom Simulasyon");
-        }
-    }
 }
 
 function applyDepotReading(depotKey, state) {
-    const tempStr = state.temp.toFixed(1);
-    const humStr = Math.round(state.hum).toString();
     const doorStr = state.doorOpen ? "OPEN" : "CLOSED";
-
-    updateQuickUI(depotKey, "temp", tempStr);
-    updateQuickUI(depotKey, "hum", humStr);
     updateQuickUI(depotKey, "door", doorStr);
-
-    checkThresholds(depotKey, "temp", tempStr);
-    checkThresholds(depotKey, "hum", humStr);
-    recordHistory(depotKey, "temp", tempStr);
-    recordHistory(depotKey, "hum", humStr);
-
     if (selectedDepotKey === depotKey) {
-        updateModalUI("temp", tempStr);
-        updateModalUI("hum", humStr);
         updateModalUI("door", doorStr);
+    }
+
+    if (typeof state.temp === "number") {
+        const tempStr = state.temp.toFixed(1);
+        updateQuickUI(depotKey, "temp", tempStr);
+        checkThresholds(depotKey, "temp", tempStr);
+        recordHistory(depotKey, "temp", tempStr);
+        if (selectedDepotKey === depotKey) updateModalUI("temp", tempStr);
+    }
+
+    if (typeof state.hum === "number") {
+        const humStr = Math.round(state.hum).toString();
+        updateQuickUI(depotKey, "hum", humStr);
+        checkThresholds(depotKey, "hum", humStr);
+        recordHistory(depotKey, "hum", humStr);
+        if (selectedDepotKey === depotKey) updateModalUI("hum", humStr);
     }
 }
 
@@ -740,28 +695,24 @@ function markDepotAsLive(depotKey) {
     if (state && !state.live) {
         state.live = true;
         updateLiveBadge(depotKey, true);
-        addAuditLog(depotKey.toUpperCase(), "Sistem", "Canli sensor verisi algilandi, simulasyon durduruldu", "log-type-login");
+        addAuditLog(depotKey.toUpperCase(), "Sistem", "Canli ESP32/Wokwi sensor verisi algilandi", "log-type-login");
     }
 }
 
 function updateLiveBadge(depotKey, isLive) {
     const badge = document.getElementById(`badge-${depotKey}`);
     if (badge) {
-        badge.innerText = isLive ? "CANLI" : "SIMULASYON";
+        badge.innerText = isLive ? "CANLI" : "VERI BEKLENIYOR";
         badge.className = `data-badge ${isLive ? "badge-live" : "badge-sim"}`;
     }
     if (selectedDepotKey === depotKey) {
         const modalBadge = document.getElementById("modal-data-badge");
         if (modalBadge) {
-            modalBadge.innerText = isLive ? "CANLI VERI" : "SIMULE VERI";
+            modalBadge.innerText = isLive ? "CANLI VERI" : "VERI BEKLENIYOR";
             modalBadge.className = `data-badge ${isLive ? "badge-live" : "badge-sim"}`;
         }
     }
 }
-
-function randomInRange(min, max) { return min + Math.random() * (max - min); }
-function randomStep(maxStep) { return (Math.random() * 2 - 1) * maxStep; }
-function clamp(value, min, max) { return Math.min(Math.max(value, min), max); }
 
 // ============================================================
 // KROKI / DETAY MODALI
