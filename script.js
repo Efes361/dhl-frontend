@@ -125,10 +125,10 @@ async function handleLogin(event) {
     const userKey = document.getElementById("username-select").value;
     const inputPass = document.getElementById("password-input").value.trim();
     const selectedUser = hostUsers[userKey];
-    const inputHash = await sha256Hex(inputPass);
-
-    if (selectedUser && selectedUser.passHash === inputHash) {
-        loginFailCount = 0;
+    c// YENİ KOD:
+if (selectedUser && selectedUser.passHash === inputPass) { // Doğrudan yazılan şifreyi kontrol eder
+    loginFailCount = 0;
+    // ...
         currentUser = { name: selectedUser.name, role: "HOST" };
         completeLogin();
         return;
