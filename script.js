@@ -119,15 +119,43 @@ function showUserNotification(user, depotKey, device, state) {
 // ============================================================
 
 function initMqttClient() {
-    mqttClient = new Paho.MQTT.Client(MQTT_CONFIG.host, Number(MQTT_CONFIG.port), MQTT_CONFIG.clientId);
+    // HiveMQ Cloud WebSockets bağlantısı için "/mqtt" yolu gereklidir
+    mqttClient = new Paho.MQTT.Client(
+        MQTT_CONFIG.host, 
+        Number(MQTT_CONFIG.port), 
+        "/mqtt", 
+        MQTT_CONFIG.clientId
+    );
 
     mqttClient.onMessageArrived = onMessageArrived;
     mqttClient.onConnectionLost = (response) => {
-        console.warn("MQTT baglantisi koptu:", response.errorMessage);
+        console.warn("MQTT bağlantısı koptu:", response.errorMessage);
         updateMqttStatus(false);
         setTimeout(initMqttClient, MQTT_CONFIG.reconnectDelayMs);
     };
 
+    const connectOptions = {
+        useSSL: true,
+        timeout: 10,
+        keepAliveInterval: 30,
+        userName: MQTT_CONFIG.username,
+        password: MQTT_CONFIG.password,
+        onSuccess: () => {
+            updateMqttStatus(true);
+            mqttClient.subscribe(`${MQTT_CONFIG.baseTopic}/#`);
+            if (typeof addAuditLog === "function") {
+                addAuditLog("MQTT Sunucusu", "HiveMQ Cloud", "Canlı veri yayın hattı kuruldu", "log-type-login");
+            }
+        },
+        onFailure: (err) => {
+            console.error("MQTT bağlantı hatası:", err.errorMessage || err);
+            updateMqttStatus(false);
+            setTimeout(initMqttClient, MQTT_CONFIG.reconnectDelayMs);
+        }
+    };
+
+    mqttClient.connect(connectOptions);
+}
     mqttClient.connect({
         useSSL: MQTT_CONFIG.useSSL,
         userName: MQTT_CONFIG.username,
