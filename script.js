@@ -53,6 +53,13 @@ const ALARM_THRESHOLDS = {
     humMax: 75,
 };
 
+// Kapi 5 dakika kesintisiz acik kalirsa alarm calsin (her acilip
+// kapanmada degil). Test etmek icin bu degeri gecici olarak
+// kucultebilirsin (orn. 5000 = 5 saniye).
+const DOOR_ALARM_CONFIG = {
+    thresholdMs: 5 * 60 * 1000, // 5 dakika
+};
+
 const LOGIN_LOCKOUT_CONFIG = {
     maxAttempts: 5,
     lockoutMs: 30000,
@@ -74,6 +81,7 @@ let totalPackagesProcessed = 1240; // KPI Simule Paket Sayaci
 const depotSimState = {};
 const depotAlarmState = {};
 const depotHistory = {};
+const depotDoorState = {}; // { [depotKey]: { open, timerId, alarmActive } }
 
 let loginFailCount = 0;
 let loginLockedUntil = 0;
@@ -235,9 +243,8 @@ function onMessageArrived(message) {
         updateModalUI(type, payload);
     }
 
-    if (type === "door" && payload.toUpperCase() === "OPEN") {
-        addAuditLog(depotKey.toUpperCase(), "Sensor Alarmi", "KAPILAR ACILDI!", "log-type-alarm");
-        playAlarmSiren();
+    if (type === "door") {
+        handleDoorStateChange(depotKey, payload.toUpperCase() === "OPEN", "Sensor");
     }
 
     updateKPICards();
@@ -337,9 +344,10 @@ function triggerSimEvent(type) {
         addAuditLog(randomDepot.toUpperCase(), "Simulasyon Testi", "Yapay kritik sıcaklık alarmi tetiklendi!", "log-type-alarm");
     } else if (type === 'door') {
         const randomDepot = DEPOT_KEYS[Math.floor(Math.random() * DEPOT_KEYS.length)];
-        depotSimState[randomDepot].doorOpen = !depotSimState[randomDepot].doorOpen;
+        const newDoorState = !depotSimState[randomDepot].doorOpen;
+        depotSimState[randomDepot].doorOpen = newDoorState;
         applyDepotReading(randomDepot, depotSimState[randomDepot]);
-        addAuditLog(randomDepot.toUpperCase(), "Simulasyon Testi", `Kapi durumu degistirildi`, "log-type-cmd");
+        handleDoorStateChange(randomDepot, newDoorState, "Simulasyon Testi");
     } else if (type === 'toggle_sim') {
         isSimulationActive = !isSimulationActive;
         addAuditLog("Simulasyon", "Operator", `Otonom simulasyon ${isSimulationActive ? 'baslatildi' : 'durduruldu'}`, "log-type-login");
@@ -432,6 +440,70 @@ function toggleAlarmMute() {
 }
 
 // ============================================================
+// KAPI ACIK KALMA SURESI TAKIBI (5 DAKIKA ESIGI)
+// ============================================================
+
+/**
+ * Kapi durumu her degistiginde (acildi/kapandi) cagrilir. Her acilip
+ * kapanmada SIREN CALMAZ; sadece bilgi amacli log yazar. Kapi acik
+ * kalirsa DOOR_ALARM_CONFIG.thresholdMs suresi icin bir zamanlayici
+ * baslatir. Sure dolana kadar kapi kapanirsa zamanlayici iptal edilir
+ * ve hicbir alarm sesi calmaz. Sure dolduğunda (kapi hala aciksa)
+ * gercek alarm (log + siren) tetiklenir.
+ */
+function handleDoorStateChange(depotKey, isOpen, sourceLabel) {
+    if (!depotDoorState[depotKey]) {
+        depotDoorState[depotKey] = { open: false, timerId: null, alarmActive: false };
+    }
+    const doorState = depotDoorState[depotKey];
+
+    const wasOpen = doorState.open;
+    doorState.open = isOpen;
+
+    if (isOpen && !wasOpen) {
+        // Kapi yeni acildi -> sadece bilgi logu, SIREN YOK.
+        addAuditLog(depotKey.toUpperCase(), sourceLabel, "Kapi acildi", "log-type-view");
+
+        if (doorState.timerId) clearTimeout(doorState.timerId);
+        doorState.timerId = setTimeout(() => {
+            doorState.timerId = null;
+            doorState.alarmActive = true;
+            const minutes = Math.round(DOOR_ALARM_CONFIG.thresholdMs / 60000);
+            addAuditLog(
+                depotKey.toUpperCase(),
+                "Sensor Alarmi",
+                `KAPI ${minutes} DAKIKADIR ACIK! ALARM!`,
+                "log-type-alarm"
+            );
+            playAlarmSiren();
+            applyDoorAlarmClass(depotKey, true);
+        }, DOOR_ALARM_CONFIG.thresholdMs);
+
+    } else if (!isOpen && wasOpen) {
+        // Kapi kapandi -> zamanlayiciyi iptal et, alarm varsa sonlandir.
+        if (doorState.timerId) {
+            clearTimeout(doorState.timerId);
+            doorState.timerId = null;
+        }
+        const wasAlarming = doorState.alarmActive;
+        doorState.alarmActive = false;
+        applyDoorAlarmClass(depotKey, false);
+
+        addAuditLog(
+            depotKey.toUpperCase(),
+            sourceLabel,
+            wasAlarming ? "Kapi kapandi (uzun sureli acik alarmi sona erdi)" : "Kapi kapandi",
+            wasAlarming ? "log-type-login" : "log-type-view"
+        );
+    }
+}
+
+function applyDoorAlarmClass(depotKey, active) {
+    const card = document.getElementById(`card-${depotKey}`);
+    if (card) card.classList.toggle("card-door-alarm", active);
+}
+
+// ============================================================
 // ALARM ESIK KONTROLU
 // ============================================================
 
@@ -467,8 +539,11 @@ function checkThresholds(depotKey, type, rawValue) {
     }
 
     if (alarmMsg) {
+        // NOT: Burada bilerek playAlarmSiren() cagrilmiyor. Siren sadece
+        // kapi 5 dakikadan uzun sure acik kalirsa (handleDoorStateChange)
+        // calmali. Sicaklik/nem esik asimlari sadece log + kart uzerinde
+        // gorsel (kirmizi) uyari ile bildiriliyor.
         addAuditLog(depotKey.toUpperCase(), "Esik Alarmi", alarmMsg, isAlarm ? "log-type-alarm" : "log-type-login");
-        if (isAlarm) playAlarmSiren();
     }
 
     applyCardStatusClass(depotKey);
@@ -629,12 +704,12 @@ function updateDoorSimState(depotKey, state) {
     if (!state.doorOpen && Math.random() < SIMULATION_CONFIG.doorOpenChance) {
         state.doorOpen = true;
         state.doorTicksLeft = SIMULATION_CONFIG.doorAutoCloseTicks;
-        addAuditLog(depotKey.toUpperCase(), "Sensor Alarmi", "KAPILAR ACILDI! (otonom simulasyon)", "log-type-alarm");
-        playAlarmSiren();
+        handleDoorStateChange(depotKey, true, "Otonom Simulasyon");
     } else if (state.doorOpen) {
         state.doorTicksLeft -= 1;
         if (state.doorTicksLeft <= 0) {
             state.doorOpen = false;
+            handleDoorStateChange(depotKey, false, "Otonom Simulasyon");
         }
     }
 }

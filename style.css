@@ -390,6 +390,14 @@ header {
     50% { box-shadow: 0 0 0 4px rgba(220, 53, 69, 0.12); }
 }
 
+/* Kapi 5 dakikadir kesintisiz acik kaldiginda (gercek alarm durumu) */
+.depot-card.card-door-alarm {
+    border-color: var(--alarm-red);
+    border-width: 2px;
+    background: rgba(220, 53, 69, 0.08);
+    animation: card-pulse 1.6s ease-in-out infinite;
+}
+
 .depot-card h3 {
     font-size: 1.1rem;
     margin-bottom: 2px;
