@@ -17,10 +17,10 @@ const deviceNames = {
 
 const MQTT_CONFIG = {
     host: "1f57481ad3a94ca3ba3535456e05baae.s1.eu.hivemq.cloud",
-    port: 8884, // Tarayıcı (WebSocket) üzerinden güvenli SSL bağlantısı
+    port: 8884, // Tarayıcı (WebSocket) SSL bağlantı portu
     useSSL: true,
     username: "test",
-    password: "xyeg6CpagfhQGrj",
+    password: "test12345.",
     clientId: "dhl_m2x_monitor_" + Math.random().toString(16).slice(2, 8),
     baseTopic: "lojistik",
     reconnectDelayMs: 5000,
@@ -63,18 +63,18 @@ let alarmAudioCtx = null;
 let alarmSoundMuted = false;
 
 // ============================================================
-// BASLANGIC (SİFRE EKRANI TAMAMEN DEVRE DISI)
+// BASLANGIC (SIFRE EKRANI DEVRE DISI)
 // ============================================================
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Giriş ekranı (Login Overlay) varsa tamamen sil/gizle
+    // Giriş ekranı (Login Overlay) varsa DOM'dan tamamen temizler
     const loginOverlay = document.getElementById("login-overlay");
     if (loginOverlay) {
         loginOverlay.style.display = "none";
-        loginOverlay.remove(); // DOM'dan tamamen kaldırır
+        loginOverlay.remove();
     }
 
-    // Arayüzdeki kullanıcı bilgilerini ayarla
+    // Arayüzdeki kullanıcı bilgilerini tanımla
     const activeUserEl = document.getElementById("active-user-name");
     if (activeUserEl) activeUserEl.innerText = currentUser.name;
 
@@ -93,7 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateKPICards();
 
     addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-login");
-    addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme doğrudan oturum acildi", "log-type-login");
+    addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme dogrudan oturum acildi", "log-type-login");
 });
 
 function logout() {
