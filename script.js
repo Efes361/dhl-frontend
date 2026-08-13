@@ -24,10 +24,8 @@ const deviceNames = {
 };
 
 const MQTT_CONFIG = {
-    host: "3cfb3fe92a4944b0857c473cc3156d76.s1.eu.hivemq.cloud",
-    port: 8883,
-    username: "dhl",
-    password: "dhl12345.",
+    host: "broker.hivemq.com",
+    port: 8884,
     useSSL: true,
     clientId: "dhl_m2x_monitor_" + Math.random().toString(16).slice(2, 8),
     baseTopic: "lojistik",
@@ -202,8 +200,6 @@ function initMqttClient() {
 
     mqttClient.connect({
         useSSL: MQTT_CONFIG.useSSL,
-        userName: MQTT_CONFIG.username,
-        password: MQTT_CONFIG.password,
         onSuccess: () => {
             updateMqttStatus(true);
             mqttClient.subscribe(`${MQTT_CONFIG.baseTopic}/#`);
