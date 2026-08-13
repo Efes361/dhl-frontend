@@ -47,9 +47,7 @@ const ALARM_THRESHOLDS = {
     humMax: 75,
 };
 
-// Kapi 5 dakika kesintisiz acik kalirsa alarm calsin (her acilip
-// kapanmada degil). Test etmek icin bu degeri gecici olarak
-// kucultebilirsin (orn. 5000 = 5 saniye).
+// Kapi 5 dakika kesintisiz acik kalirsa alarm calsin (her acilip kapanmada degil).
 const DOOR_ALARM_CONFIG = {
     thresholdMs: 5 * 60 * 1000, // 5 dakika
 };
@@ -61,10 +59,7 @@ const LOGIN_LOCKOUT_CONFIG = {
 
 const HISTORY_MAX_POINTS = 20;
 
-// Sayfa yenilendiginde oturumun acik kalmasi icin tarayici hafizasinda
-// (localStorage) tutulan anahtar. Kullanici manuel olarak cikis
-// yapmadikca (logout) bu kayit silinmez, boylece "yenile" (F5/refresh)
-// tekrar giris ekranina atmaz.
+// Sayfa yenilendiginde oturumun acik kalmasi icin tarayici hafizasinda tutulan anahtar.
 const SESSION_STORAGE_KEY = "m2x_session_user";
 
 // ============================================================
@@ -101,6 +96,13 @@ document.addEventListener("DOMContentLoaded", () => {
     addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-logout");
     restoreSession();
 });
+
+// Tarayici otomatik ses oynatma kisitlamasini ilk tiklamada kaldırma
+document.addEventListener("click", () => {
+    if (alarmAudioCtx && alarmAudioCtx.state === "suspended") {
+        alarmAudioCtx.resume();
+    }
+}, { once: true });
 
 // ============================================================
 // YARDIMCI: SIFRE HASH'LEME & GENEL YARDIMCILAR
@@ -168,11 +170,6 @@ function loginAsGuest() {
 
 function completeLogin(isRestore = false) {
     if (!isRestore) {
-        // Giris bir kullanici tiklamasi oldugu icin AudioContext'i burada
-        // "isitiyoruz" - boylece ilerideki otomatik alarm sesleri tarayicinin
-        // otomatik-oynatma (autoplay) kisitlamasina takilmaz. Oturum sayfa
-        // yenilemesinde otomatik geri yuklendiginde (isRestore) kullanici
-        // tiklamasi olmadigi icin bu adim atlanir.
         getAlarmAudioCtx();
     }
 
@@ -206,7 +203,7 @@ function logout() {
 }
 
 // ============================================================
-// OTURUM KALICILIGI (sayfa yenilenince tekrar giris istemesin)
+// OTURUM KALICILIGI
 // ============================================================
 
 function saveSession() {
@@ -240,26 +237,22 @@ function restoreSession() {
 }
 
 // ============================================================
-// ROL BAZLI GORUNURLUK (Misafir/Guvenlik sadece durumu gorsun)
+// ROL BAZLI GORUNURLUK
 // ============================================================
 
 function applyRolePermissions(isHost) {
-    // Denetim/audit loglari sadece Host (Admin) kullanicilara acik.
     const auditPanel = document.getElementById("audit-log-panel");
     if (auditPanel) auditPanel.style.display = isHost ? "" : "none";
 
-    // Log paneli gizlenince alt bolum duzeni tek sutuna gecsin
-    // (bos/garip bir bosluk kalmasin).
     const bottomSections = document.getElementById("bottom-sections");
     if (bottomSections) bottomSections.classList.toggle("bottom-sections-single", !isHost);
 
-    // Manuel test/kontrol paneli de sadece Host icin (Misafir sadece izler).
     const simPanel = document.getElementById("sim-control-panel");
     if (simPanel) simPanel.style.display = isHost ? "" : "none";
 }
 
 // ============================================================
-// MQTT BAGLANTI YONETIMI
+// MQTT BAGLANTI VE KOMUT YONETIMI
 // ============================================================
 
 function initMqttClient() {
@@ -302,8 +295,6 @@ function onMessageArrived(message) {
     checkThresholds(depotKey, type, payload);
     recordHistory(depotKey, type, payload);
 
-    // KPI ortalamalarinin dogru hesaplanabilmesi icin son gelen gercek
-    // ESP32/Wokwi degerini de depo durumuna yaziyoruz.
     if (depotSimState[depotKey]) {
         if (type === "temp" || type === "hum") {
             const numeric = parseFloat(payload);
@@ -334,9 +325,11 @@ function updateQuickUI(depotKey, type, value) {
         card.querySelector(".m-hum").innerText = `${value}%`;
     } else if (type === "door") {
         const doorTag = document.getElementById(`door-${depotKey}`);
-        const isOpen = value.toUpperCase() === "OPEN";
-        doorTag.className = `door-tag ${isOpen ? "door-open" : "door-closed"}`;
-        doorTag.innerText = isOpen ? "ACIK" : "KAPALI";
+        if (doorTag) {
+            const isOpen = value.toUpperCase() === "OPEN";
+            doorTag.className = `door-tag ${isOpen ? "door-open" : "door-closed"}`;
+            doorTag.innerText = isOpen ? "ACIK" : "KAPALI";
+        }
     }
 }
 
@@ -344,7 +337,6 @@ function sendControl(device, state) {
     if (!selectedDepotKey || !currentUser || currentUser.role !== "HOST") return;
     if (!deviceNames[device]) return;
 
-    // Kapi OPEN/CLOSE komutu bekler, diger cihazlar (fan/tv/tost/kahve) ON/OFF bekler.
     const isDoor = device === "door";
     const validStates = isDoor ? DOOR_COMMAND_STATES : ["ON", "OFF"];
     if (!validStates.includes(state)) return;
@@ -370,19 +362,18 @@ function sendControl(device, state) {
     addAuditLog(selectedDepotKey.toUpperCase(), currentUser.name, `KOMUT: ${deviceLabel} -> ${actionText}`, "log-type-cmd");
     showUserNotification(currentUser.name, selectedDepotKey, device, isDoor ? (state === "OPEN" ? "ON" : "OFF") : state);
 
-    // Kapi icin, sensorden gelecek onayi beklemeden arayuzu de anlik guncelle
-    // (ESP32 tarafi komutu isleyip gercek sensor durumunu geri yayinlayacaktir).
     if (isDoor) {
         handleDoorStateChange(selectedDepotKey, state === "OPEN", currentUser.name + " (Manuel Komut)");
     }
 }
 
 // ============================================================
-// KPI METRIKLERI VE CANLI HESAPLAMALAR (A.1)
+// KPI METRIKLERI VE CANLI HESAPLAMALAR
 // ============================================================
 
 function updateKPICards() {
-    document.getElementById("kpi-total-packages").innerText = totalPackagesProcessed;
+    const pkgEl = document.getElementById("kpi-total-packages");
+    if (pkgEl) pkgEl.innerText = totalPackagesProcessed;
 
     let totalTemp = 0;
     let validTempCount = 0;
@@ -400,26 +391,29 @@ function updateKPICards() {
         }
     });
 
-    if (validTempCount > 0) {
-        document.getElementById("kpi-avg-temp").innerText = (totalTemp / validTempCount).toFixed(1) + " °C";
+    const avgTempEl = document.getElementById("kpi-avg-temp");
+    if (avgTempEl && validTempCount > 0) {
+        avgTempEl.innerText = (totalTemp / validTempCount).toFixed(1) + " °C";
     }
 
     const alarmStatusEl = document.getElementById("kpi-alarm-status");
     const alarmCountEl = document.getElementById("kpi-alarm-count");
 
-    if (totalAlarmCount > 0) {
-        alarmStatusEl.innerText = "ALARM VAR";
-        alarmStatusEl.className = "kpi-value status-alarm";
-        alarmCountEl.innerText = `${totalAlarmCount} Depoda Kritik Esik Asildi`;
-    } else {
-        alarmStatusEl.innerText = "NORMAL";
-        alarmStatusEl.className = "kpi-value status-ok";
-        alarmCountEl.innerText = "Tum Eşikler Güvenli";
+    if (alarmStatusEl && alarmCountEl) {
+        if (totalAlarmCount > 0) {
+            alarmStatusEl.innerText = "ALARM VAR";
+            alarmStatusEl.className = "kpi-value status-alarm";
+            alarmCountEl.innerText = `${totalAlarmCount} Depoda Kritik Esik Asildi`;
+        } else {
+            alarmStatusEl.innerText = "NORMAL";
+            alarmStatusEl.className = "kpi-value status-ok";
+            alarmCountEl.innerText = "Tum Eşikler Güvenli";
+        }
     }
 }
 
 // ============================================================
-// SIMULASYON KONTROL ISLEMLERI (E.3)
+// SIMULASYON KONTROL ISLEMLERI
 // ============================================================
 
 function triggerSimEvent(type) {
@@ -437,14 +431,9 @@ function triggerSimEvent(type) {
 }
 
 // ============================================================
-// ALARM SESI (TAMAMEN KOD ILE URETILEN SIREN - MP3/WAV DOSYASI YOK)
+// ALARM SESI (WEB AUDIO API SENTEZLEYICI)
 // ============================================================
 
-/**
- * AudioContext'i tembel (lazy) sekilde olusturur/dondurur. Tarayicilar
- * otomatik ses calmayi kisitladigi icin context, ancak bir kullanici
- * etkilesiminden (tiklama vb.) sonra "resume" edilebilir.
- */
 function getAlarmAudioCtx() {
     if (!alarmAudioCtx) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -457,16 +446,11 @@ function getAlarmAudioCtx() {
     return alarmAudioCtx;
 }
 
-/**
- * Klasik iki tonlu (Avrupa tipi) siren efektini sentezler ve calar.
- * Hicbir ses dosyasina ihtiyac duymaz; frekansi zamanla salinan bir
- * osilator + kazanc (gain) zarfi kullanilir.
- */
 function playAlarmSiren(durationMs = 2200) {
     if (alarmSoundMuted) return;
 
     const ctx = getAlarmAudioCtx();
-    if (!ctx) return; // Tarayici Web Audio API'yi desteklemiyor
+    if (!ctx) return;
 
     const now = ctx.currentTime;
     const totalSec = durationMs / 1000;
@@ -474,7 +458,7 @@ function playAlarmSiren(durationMs = 2200) {
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
-    osc.type = "sawtooth"; // Sirene benzer, sert/dikkat cekici bir tini
+    osc.type = "sawtooth";
     osc.connect(gainNode);
     gainNode.connect(ctx.destination);
 
@@ -483,8 +467,6 @@ function playAlarmSiren(durationMs = 2200) {
     gainNode.gain.setValueAtTime(0.28, now + totalSec - 0.15);
     gainNode.gain.linearRampToValueAtTime(0, now + totalSec);
 
-    // Frekansi 500Hz <-> 900Hz arasinda ileri geri salinan bir "wail"
-    // deseni; her tam cevrim yaklasik 0.5 saniye surer.
     const cycleSec = 0.5;
     const cycles = Math.ceil(totalSec / cycleSec);
     for (let i = 0; i <= cycles; i++) {
@@ -497,15 +479,11 @@ function playAlarmSiren(durationMs = 2200) {
     osc.stop(now + totalSec);
 }
 
-/** Test butonuna basildiginda cagrilir; hem sesi denemek hem de
- * tarayicinin otomatik ses kisitlamasini bu kullanici etkilesimiyle
- * "acmak" icin kullanilir. */
 function testAlarmSound() {
     playAlarmSiren(2200);
     addAuditLog("Sistem", currentUser ? currentUser.name : "Ziyaretci", "Alarm sesi test edildi", "log-type-view");
 }
 
-/** Header'daki hoparlor butonuyla alarm sesini ac/kapat (mute) yapar. */
 function toggleAlarmMute() {
     alarmSoundMuted = !alarmSoundMuted;
     const btn = document.getElementById("btn-alarm-mute");
@@ -525,14 +503,6 @@ function toggleAlarmMute() {
 // KAPI ACIK KALMA SURESI TAKIBI (5 DAKIKA ESIGI)
 // ============================================================
 
-/**
- * Kapi durumu her degistiginde (acildi/kapandi) cagrilir. Her acilip
- * kapanmada SIREN CALMAZ; sadece bilgi amacli log yazar. Kapi acik
- * kalirsa DOOR_ALARM_CONFIG.thresholdMs suresi icin bir zamanlayici
- * baslatir. Sure dolana kadar kapi kapanirsa zamanlayici iptal edilir
- * ve hicbir alarm sesi calmaz. Sure dolduğunda (kapi hala aciksa)
- * gercek alarm (log + siren) tetiklenir.
- */
 function handleDoorStateChange(depotKey, isOpen, sourceLabel) {
     if (!depotDoorState[depotKey]) {
         depotDoorState[depotKey] = { open: false, timerId: null, alarmActive: false };
@@ -543,7 +513,6 @@ function handleDoorStateChange(depotKey, isOpen, sourceLabel) {
     doorState.open = isOpen;
 
     if (isOpen && !wasOpen) {
-        // Kapi yeni acildi -> sadece bilgi logu, SIREN YOK.
         addAuditLog(depotKey.toUpperCase(), sourceLabel, "Kapi acildi", "log-type-view");
 
         if (doorState.timerId) clearTimeout(doorState.timerId);
@@ -562,7 +531,6 @@ function handleDoorStateChange(depotKey, isOpen, sourceLabel) {
         }, DOOR_ALARM_CONFIG.thresholdMs);
 
     } else if (!isOpen && wasOpen) {
-        // Kapi kapandi -> zamanlayiciyi iptal et, alarm varsa sonlandir.
         if (doorState.timerId) {
             clearTimeout(doorState.timerId);
             doorState.timerId = null;
@@ -621,10 +589,6 @@ function checkThresholds(depotKey, type, rawValue) {
     }
 
     if (alarmMsg) {
-        // NOT: Burada bilerek playAlarmSiren() cagrilmiyor. Siren sadece
-        // kapi 5 dakikadan uzun sure acik kalirsa (handleDoorStateChange)
-        // calmali. Sicaklik/nem esik asimlari sadece log + kart uzerinde
-        // gorsel (kirmizi) uyari ile bildiriliyor.
         addAuditLog(depotKey.toUpperCase(), "Esik Alarmi", alarmMsg, isAlarm ? "log-type-alarm" : "log-type-login");
     }
 
@@ -737,12 +701,8 @@ function destroyHistoryChart() {
 }
 
 // ============================================================
-// DEPO DURUMU BASLATMA (ARTIK OTONOM DEGER URETIMI YOK)
+// DEPO DURUMU BASLATMA
 // ============================================================
-// ESP32 / Wokwi tarafindan MQTT uzerinden gonderilen gercek sicaklik,
-// nem ve kapi verileri gelene kadar kartlar "--" placeholder ile
-// bekler. Gercek veri geldiginde onMessageArrived() -> markDepotAsLive()
-// devreye girer ve kart "CANLI" rozetine gecer.
 
 function initDepotState() {
     DEPOT_KEYS.forEach((depotKey) => {
@@ -835,9 +795,9 @@ function openDetails(depotKey, title) {
     const state = depotSimState[depotKey];
     updateLiveBadge(depotKey, !!(state && state.live));
 
-    if (state && !state.live) {
-        updateModalUI("temp", state.temp.toFixed(1));
-        updateModalUI("hum", Math.round(state.hum).toString());
+    if (state && state.live) {
+        if (typeof state.temp === "number") updateModalUI("temp", state.temp.toFixed(1));
+        if (typeof state.hum === "number") updateModalUI("hum", Math.round(state.hum).toString());
     }
 
     renderHistoryChart(depotKey);
@@ -854,13 +814,14 @@ function closeDetails() {
 
 function updateModalUI(type, value) {
     const upperValue = value.toUpperCase();
-    // Kapi "OPEN/CLOSED", diger cihazlar "ON/OFF" degeriyle gelir.
     const isOn = type === "door" ? upperValue === "OPEN" : upperValue === "ON";
 
     if (type === "temp") {
-        document.getElementById("modal-temp").innerText = `${value} °C`;
+        const tempEl = document.getElementById("modal-temp");
+        if (tempEl) tempEl.innerText = `${value} °C`;
     } else if (type === "hum") {
-        document.getElementById("modal-hum").innerText = `${value} %`;
+        const humEl = document.getElementById("modal-hum");
+        if (humEl) humEl.innerText = `${value} %`;
     }
 
     const statusText = document.getElementById(`m-status-${type}`);
@@ -901,7 +862,7 @@ function resetModalValues() {
 }
 
 // ============================================================
-// DENETIM (AUDIT) LOGLARI VE FILTRELEME (C.2)
+// DENETIM (AUDIT) LOGLARI VE FILTRELEME
 // ============================================================
 
 function addAuditLog(location, user, action, cssClass = "") {
@@ -989,6 +950,8 @@ function exportLogsToCsv() {
 
 function showUserNotification(user, depotKey, device, state) {
     const area = document.getElementById("notification-area");
+    if (!area) return;
+
     const depotName = depotKey.charAt(0).toUpperCase() + depotKey.slice(1);
     const deviceLabel = deviceNames[device] || device;
     const actionLabel = state === "ON" ? "ACTI" : "KAPATTI";
@@ -1023,6 +986,8 @@ function showUserNotification(user, depotKey, device, state) {
 
 function updateMqttStatus(isOnline) {
     const statusEl = document.getElementById("mqtt-status");
-    statusEl.innerText = isOnline ? "MQTT: BAGLANDI" : "MQTT: BAGLANTI YOK";
-    statusEl.style.background = isOnline ? "var(--safe-green)" : "var(--alarm-red)";
+    if (statusEl) {
+        statusEl.innerText = isOnline ? "MQTT: BAGLANDI" : "MQTT: BAGLANTI YOK";
+        statusEl.style.background = isOnline ? "var(--safe-green)" : "var(--alarm-red)";
+    }
 }
