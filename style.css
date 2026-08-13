@@ -3,6 +3,787 @@
     padding: 0;
     box-sizing: border-box;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}/* ===========================================================
+   DHL M2X DEPO YÖNETİM PANELİ - STİL DOSYASI
+   =========================================================== */
+
+:root {
+    --dhl-yellow: #FFCC00;
+    --dhl-red: #D40511;
+    --soft-bg: #F8F9FA;
+    --text-dark: #333333;
+    --border-light: #DEE2E6;
+    --safe-green: #28A745;
+    --alarm-red: #DC3545;
+    --warn-orange: #FD7E14;
+    --card-bg: #FFFFFF;
+    --input-bg: #FFFFFF;
+}
+
+/* Karanlık Tema Sınıfı */
+body.dark-mode {
+    --soft-bg: #1e1e24;
+    --text-dark: #f1f1f1;
+    --border-light: #333339;
+    --card-bg: #2b2b36;
+    --input-bg: #383845;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: var(--soft-bg);
+    color: var(--text-dark);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+/* Klavye ile gezinen kullanıcılar için görünür odak */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.depot-card:focus-visible {
+    outline: 3px solid var(--dhl-red);
+    outline-offset: 2px;
+}
+
+/* --- GİRİŞ (LOGIN) MODALI --- */
+#login-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.login-card {
+    background: var(--card-bg);
+    color: var(--text-dark);
+    width: 400px;
+    max-width: 92vw;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    border-top: 6px solid var(--dhl-red);
+    text-align: center;
+}
+
+.login-header .dhl-logo-img {
+    display: block;
+    margin: 0 auto 8px;
+    background: var(--dhl-yellow);
+    padding: 6px 22px;
+    border-radius: 6px;
+    height: 64px;
+    width: auto;
+}
+
+.login-header h2 {
+    font-size: 1.1rem;
+    color: var(--text-dark);
+    margin-bottom: 20px;
+}
+
+.form-group {
+    text-align: left;
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.login-input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border-light);
+    background: var(--input-bg);
+    color: var(--text-dark);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    outline: none;
+}
+
+.login-input:focus {
+    border-color: var(--dhl-red);
+}
+
+.login-error {
+    color: var(--alarm-red);
+    font-size: 0.85rem;
+    margin-bottom: 10px;
+    min-height: 18px;
+    font-weight: bold;
+}
+
+.btn-login {
+    width: 100%;
+    padding: 12px;
+    background: var(--dhl-red);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-login:hover {
+    background: #b0040e;
+}
+
+.login-divider {
+    margin: 20px 0;
+    position: relative;
+    text-align: center;
+}
+
+.login-divider::before {
+    content: "";
+    position: absolute;
+    top: 50%; left: 0; width: 100%;
+    height: 1px;
+    background: var(--border-light);
+}
+
+.login-divider span {
+    background: var(--card-bg);
+    padding: 0 10px;
+    position: relative;
+    font-size: 0.75rem;
+    color: #888;
+}
+
+.btn-guest {
+    width: 100%;
+    padding: 10px;
+    background: #e9ecef;
+    color: #333;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-weight: bold;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-guest:hover {
+    background: #dee2e6;
+}
+
+/* --- ÜST BANT (HEADER) --- */
+header {
+    background-color: var(--dhl-yellow);
+    padding: 10px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 4px solid var(--dhl-red);
+    flex-shrink: 0;
+    z-index: 100;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.logo-area {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.dhl-logo-img {
+    height: 46px;
+    width: auto;
+    display: block;
+    border-radius: 4px;
+}
+
+.dhl-logo-img-header {
+    height: 46px;
+}
+
+.header-title {
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: black;
+    margin-top: 5px;
+}
+
+.status-area {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.btn-theme-toggle {
+    background: #333;
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 15px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+/* --- ALARM SESI TEST / AC-KAPA BUTONLARI --- */
+.btn-test-alarm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--alarm-red);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+}
+
+.btn-test-alarm:hover { background: #b5202f; }
+.btn-test-alarm:active { transform: scale(0.96); }
+
+.btn-alarm-mute {
+    background: var(--card-bg);
+    border: 1px solid var(--dhl-red);
+    color: var(--dhl-red);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 0.95rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.btn-alarm-mute:hover { background: rgba(220, 53, 69, 0.08); }
+
+.user-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: white;
+    color: black;
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--dhl-red);
+    font-size: 0.85rem;
+    font-weight: bold;
+}
+
+.role-tag {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 10px;
+    color: white;
+}
+
+.role-host { background: var(--dhl-red); }
+.role-guest { background: #6c757d; }
+
+.btn-logout {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.mqtt-status {
+    font-size: 0.8rem;
+    font-weight: bold;
+    color: white;
+    background: #666;
+    padding: 5px 12px;
+    border-radius: 15px;
+    transition: background 0.3s;
+}
+
+/* --- ANA TASLAK --- */
+#main-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: 20px 40px;
+    gap: 15px;
+    overflow-y: auto;
+}
+
+/* KPI Kart Paneli */
+.kpi-container {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    flex-shrink: 0;
+}
+
+.kpi-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 12px 18px;
+    border-left: 4px solid var(--dhl-red);
+}
+
+.kpi-title {
+    font-size: 0.75rem;
+    font-weight: bold;
+    color: #777;
+}
+
+.kpi-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin: 4px 0;
+}
+
+.kpi-sub {
+    font-size: 0.7rem;
+    color: #999;
+}
+
+.status-ok { color: var(--safe-green); }
+.status-alarm { color: var(--alarm-red); }
+
+/* Depo Grid */
+.depot-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 15px;
+    flex-shrink: 0;
+}
+
+.depot-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 15px;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+.depot-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    border-color: var(--dhl-yellow);
+}
+
+.depot-card.card-alarm {
+    border-color: var(--alarm-red);
+    border-width: 2px;
+    background: rgba(220, 53, 69, 0.05);
+    animation: card-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes card-pulse {
+    50% { box-shadow: 0 0 0 4px rgba(220, 53, 69, 0.12); }
+}
+
+/* Kapi 5 dakikadir kesintisiz acik kaldiginda (gercek alarm durumu) */
+.depot-card.card-door-alarm {
+    border-color: var(--alarm-red);
+    border-width: 2px;
+    background: rgba(220, 53, 69, 0.08);
+    animation: card-pulse 1.6s ease-in-out infinite;
+}
+
+.depot-card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 2px;
+}
+
+.depot-card p {
+    font-size: 0.8rem;
+    color: #777;
+    margin-bottom: 10px;
+}
+
+.data-badge {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: bold;
+    padding: 2px 7px;
+    border-radius: 10px;
+    letter-spacing: 0.3px;
+}
+
+.badge-live {
+    background: #E6FCF5;
+    color: #0CA678;
+    border: 1px solid #0CA678;
+}
+
+.badge-sim {
+    background: #FFF9DB;
+    color: #A17B00;
+    border: 1px solid #E8C200;
+}
+
+.card-top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.quick-metrics {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+.door-tag {
+    font-size: 0.75rem;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.door-closed {
+    background: #E2E6EA;
+    color: #495057;
+}
+
+.door-open {
+    background: var(--alarm-red);
+    color: white;
+    animation: flash 1s infinite;
+}
+
+@keyframes flash { 50% { opacity: 0.6; } }
+
+/* Simülasyon Kontrol Paneli */
+.sim-control-box {
+    padding: 10px 20px;
+}
+
+.sim-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 5px;
+    flex-wrap: wrap;
+}
+
+.btn-sim-act {
+    background: #e9ecef;
+    border: 1px solid #ced4da;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-sim-act:hover { background: #dee2e6; }
+.btn-sim-danger { color: var(--alarm-red); border-color: var(--alarm-red); }
+
+/* ALT PANEL VE LOG TABLOSU */
+.bottom-sections {
+    display: grid;
+    grid-template-columns: 2.2fr 1fr;
+    gap: 20px;
+    flex: 1;
+    min-height: 240px;
+}
+
+.panel-box {
+    background: var(--card-bg);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 15px 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-header {
+    font-size: 0.95rem;
+    font-weight: bold;
+    color: var(--dhl-red);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.panel-header-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.log-search-input {
+    padding: 3px 8px;
+    font-size: 0.75rem;
+    border: 1px solid var(--border-light);
+    background: var(--input-bg);
+    color: var(--text-dark);
+    border-radius: 4px;
+}
+
+.btn-clear-log, .btn-export-csv {
+    background: #e9ecef;
+    border: 1px solid #ced4da;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    font-weight: bold;
+    color: #333;
+}
+
+.btn-export-csv {
+    background: #E6FCF5;
+    border-color: #0CA678;
+    color: #0CA678;
+}
+
+.log-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.log-table th {
+    text-align: left;
+    background: rgba(0,0,0,0.03);
+    padding: 6px 8px;
+    border-bottom: 2px solid var(--border-light);
+    position: sticky;
+    top: 0;
+}
+
+.log-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.log-type-login { color: #2b8a3e; font-weight: bold; }
+.log-type-logout { color: #868e96; }
+.log-type-view { color: #1971c2; font-weight: bold; }
+.log-type-cmd { color: #d9480f; font-weight: bold; }
+.log-type-alarm { color: #c92a2a; font-weight: bold; }
+.log-type-deny { color: #e03131; font-weight: bold; }
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.88rem;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.info-label { color: #777; }
+.info-value { font-weight: bold; }
+
+/* --- KROKİ MODALI --- */
+#details-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.details-box {
+    background: var(--card-bg);
+    color: var(--text-dark);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 1000px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-height: 90%;
+}
+
+.details-header {
+    background: var(--dhl-yellow);
+    padding: 15px 25px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 3px solid var(--dhl-red);
+}
+
+.details-header h2 {
+    color: var(--dhl-red);
+    font-size: 1.6rem;
+    font-style: italic;
+    font-weight: 900;
+    margin: 0;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 2.5rem;
+    color: #000;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.details-content {
+    display: flex;
+    padding: 25px;
+    gap: 20px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.kroki-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 260px;
+}
+
+.kroki-area {
+    background: #F1F3F5;
+    border: 2px solid #6C757D;
+    flex: 1;
+    position: relative;
+    border-radius: 4px;
+    overflow: hidden;
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.floorplan-svg {
+    width: 100%;
+    height: 100%;
+    background: white;
+}
+
+.floorplan-svg .room-outline { fill: #FAFAFA; stroke: #ADB5BD; stroke-width: 3; }
+.floorplan-svg .door-shape { fill: var(--safe-green); transition: fill 0.2s; }
+.floorplan-svg .door-shape.door-open-w { fill: var(--alarm-red); }
+.floorplan-svg .device-icon { transition: fill 0.2s; }
+.floorplan-svg .device-icon.device-on { fill: var(--safe-green); }
+.floorplan-svg .device-icon.device-off { fill: #ADB5BD; }
+.floorplan-svg .device-label { font-size: 10px; fill: #495057; font-weight: bold; }
+
+.history-chart-wrap {
+    height: 170px;
+    position: relative;
+}
+
+.control-pane {
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    flex-shrink: 0;
+}
+
+.sensor-group {
+    background: rgba(0,0,0,0.02);
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-light);
+}
+
+.group-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 4px;
+    font-size: 0.85rem;
+}
+
+.ctrl-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+}
+
+.status-text {
+    font-weight: bold;
+    font-size: 0.8rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.text-on { background: #E6FCF5; color: #0CA678; }
+.text-off { background: #FFF5F5; color: #F03E3E; }
+
+.btn-group { display: flex; gap: 5px; }
+
+.btn-ctrl {
+    padding: 3px 8px;
+    border: 1px solid #CED4DA;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 0.75rem;
+    background: white;
+}
+
+/* BİLDİRİM KUTUSU */
+#notification-area {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.notify-box {
+    background: rgba(0,0,0,0.85);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    border-left: 4px solid var(--dhl-yellow);
+    transform: translateX(120%);
+    transition: transform 0.3s ease-out;
+}
+
+.notify-box.show { transform: translateX(0); }
+
+/* DUYARLILIK (RESPONSIVE) */
+@media (max-width: 1100px) {
+    .kpi-container { grid-template-columns: repeat(2, 1fr); }
+    .depot-grid { grid-template-columns: repeat(3, 1fr); }
+    .bottom-sections { grid-template-columns: 1fr; }
+    .details-content { flex-direction: column; }
+    .control-pane { width: 100%; }
+}
+
+@media (max-width: 640px) {
+    .kpi-container { grid-template-columns: 1fr; }
+    .depot-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 body {
