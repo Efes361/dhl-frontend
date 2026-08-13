@@ -3,326 +3,157 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DHL M2X Depo Yönetim | Canli Takip</title>
-    <!-- Paho MQTT Kütüphanesi -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
-    <!-- Chart.js: depo sicaklik/nem gecmis grafigi ve genel trendler icin -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-    <!-- Harici CSS Dosyası -->
+    <title>DHL M2X - Akıllı Depo Yönetim Paneli</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
 </head>
 <body>
-
-    <!-- GIRIS (LOGIN) MODALI -->
-    <div id="login-overlay">
-        <div class="login-card">
-            <div class="login-header">
-                <img src="dhl-logo.jpg" alt="DHL Logo" class="dhl-logo-img dhl-logo-img-login">
-                <h2>M2X Depo Giris Portali</h2>
-            </div>
-
-            <form id="login-form" onsubmit="handleLogin(event)">
-                <div class="form-group">
-                    <label for="username-select">Yonetici Secin (Host):</label>
-                    <select id="username-select" class="login-input">
-                        <option value="abdullah">Abdullah Carkci</option>
-                        <option value="efe">Enver Efe Timur</option>
-                        <option value="yusuf">Yusuf Gungor</option>
-                        <option value="harun">Harun Kurt</option>
-                        <option value="cem">Cem</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="password-input">Sifre:</label>
-                    <input type="password" id="password-input" class="login-input" placeholder="Sifrenizi giriniz" autocomplete="current-password">
-                </div>
-
-                <div id="login-error" class="login-error" role="alert"></div>
-
-                <button type="submit" class="btn-login">Giris Yap (Host / Admin)</button>
-            </form>
-
-            <div class="login-divider"><span>VEYA</span></div>
-
-            <button type="button" class="btn-guest" onclick="loginAsGuest()">
-                🛡️ Guvenlik Gorevlisi / Misafir Girisi (Sadece Izleme)
-            </button>
+    <div class="sidebar">
+        <div class="brand">
+            <i class="fa-solid fa-boxes-packing"></i>
+            <h2>DHL M2X</h2>
         </div>
-    </div>
-
-    <!-- BILDIRIM ALANI (Sag Ust) -->
-    <div id="notification-area" aria-live="polite"></div>
-
-    <!-- UST BANT -->
-    <header>
-        <div class="logo-area">
-            <img src="dhl-logo.jpg" alt="DHL Logo" class="dhl-logo-img dhl-logo-img-header">
-            <span class="header-title">DHL M2X Depo Yonetim</span>
-        </div>
-        <div class="status-area">
-            <button class="btn-theme-toggle" onclick="toggleTheme()" id="theme-btn">🌙 Gece Modu</button>
-            <button class="btn-test-alarm" onclick="testAlarmSound()" title="Alarm sesini test et">🚨 Alarm Sesini Test Et</button>
-            <button id="btn-alarm-mute" class="btn-alarm-mute" onclick="toggleAlarmMute()" title="Alarm Sesi Acik (kapatmak icin tikla)">🔊</button>
-            <span id="mqtt-status" class="mqtt-status">MQTT: Baglaniyor...</span>
-
-            <!-- AKTIF KULLANICI / ROL ROZETI -->
-            <div class="user-badge">
-                <span id="active-user-name">Giris Yapilmadi</span>
-                <span id="active-user-role" class="role-tag">--</span>
-                <button class="btn-logout" onclick="logout()" title="Cikis Yap" aria-label="Cikis Yap">🚪</button>
-            </div>
-        </div>
-    </header>
-
-    <!-- ANA TASLAK -->
-    <div id="main-content">
-
-        <!-- KPI METRIK PANELİ (A.1) -->
-        <div class="kpi-container">
-            <div class="kpi-card">
-                <div class="kpi-title">TOPLAM İŞLENEN PAKET</div>
-                <div class="kpi-value" id="kpi-total-packages">0</div>
-                <div class="kpi-sub">Canli İslem Sayaci</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-title">AKTİF DEPO / İSTASYON</div>
-                <div class="kpi-value" id="kpi-active-depots">5 / 5</div>
-                <div class="kpi-sub">Sistemde Kayitli</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-title">ORTALAMA SICAKLIK</div>
-                <div class="kpi-value" id="kpi-avg-temp">-- °C</div>
-                <div class="kpi-sub">Depolar Geneli</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-title">ALARM DURUMU</div>
-                <div class="kpi-value status-ok" id="kpi-alarm-status">NORMAL</div>
-                <div class="kpi-sub" id="kpi-alarm-count">0 Kritik Uyarilari</div>
-            </div>
-        </div>
-
-        <!-- UST 5'LI DEPO GRID -->
-        <div class="depot-grid">
-            <!-- 1. Esenyurt -->
-            <div class="depot-card" id="card-esenyurt" onclick="handleDepotClick('esenyurt', 'Esenyurt Lojistik M.')">
-                <div class="card-top-row">
-                    <h3>ESENYURT</h3>
-                    <span id="badge-esenyurt" class="data-badge badge-sim">VERI BEKLENIYOR</span>
-                </div>
-                <p>Istanbul Avrupa</p>
-                <div class="quick-metrics">
-                    <span class="m-temp">--°C</span>
-                    <span class="m-hum">--%</span>
-                    <span id="door-esenyurt" class="door-tag door-closed">KAPALI</span>
-                </div>
-            </div>
-            <!-- 2. Gebze -->
-            <div class="depot-card" id="card-gebze" onclick="handleDepotClick('gebze', 'Gebze Lojistik M.')">
-                <div class="card-top-row">
-                    <h3>GEBZE</h3>
-                    <span id="badge-gebze" class="data-badge badge-sim">VERI BEKLENIYOR</span>
-                </div>
-                <p>Kocaeli / Marmara</p>
-                <div class="quick-metrics">
-                    <span class="m-temp">--°C</span>
-                    <span class="m-hum">--%</span>
-                    <span id="door-gebze" class="door-tag door-closed">KAPALI</span>
-                </div>
-            </div>
-            <!-- 3. Tuzla -->
-            <div class="depot-card" id="card-tuzla" onclick="handleDepotClick('tuzla', 'Tuzla (Asya 1) Lojistik M.')">
-                <div class="card-top-row">
-                    <h3>TUZLA</h3>
-                    <span id="badge-tuzla" class="data-badge badge-sim">VERI BEKLENIYOR</span>
-                </div>
-                <p>Istanbul Anadolu</p>
-                <div class="quick-metrics">
-                    <span class="m-temp">--°C</span>
-                    <span class="m-hum">--%</span>
-                    <span id="door-tuzla" class="door-tag door-closed">KAPALI</span>
-                </div>
-            </div>
-            <!-- 4. Orhanlı -->
-            <div class="depot-card" id="card-orhanli" onclick="handleDepotClick('orhanli', 'Orhanli Lojistik M.')">
-                <div class="card-top-row">
-                    <h3>ORHANLI</h3>
-                    <span id="badge-orhanli" class="data-badge badge-sim">VERI BEKLENIYOR</span>
-                </div>
-                <p>Istanbul Anadolu</p>
-                <div class="quick-metrics">
-                    <span class="m-temp">--°C</span>
-                    <span class="m-hum">--%</span>
-                    <span id="door-orhanli" class="door-tag door-closed">KAPALI</span>
-                </div>
-            </div>
-            <!-- 5. Hadımköy -->
-            <div class="depot-card" id="card-hadimkoy" onclick="handleDepotClick('hadimkoy', 'Hadimkoy Lojistik M.')">
-                <div class="card-top-row">
-                    <h3>HADIMKOY</h3>
-                    <span id="badge-hadimkoy" class="data-badge badge-sim">VERI BEKLENIYOR</span>
-                </div>
-                <p>Istanbul Avrupa</p>
-                <div class="quick-metrics">
-                    <span class="m-temp">--°C</span>
-                    <span class="m-hum">--%</span>
-                    <span id="door-hadimkoy" class="door-tag door-closed">KAPALI</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- MANUEL TEST PANELI (Gercek ESP32/Wokwi verisi baglanmadan once test icin) -->
-        <div class="panel-box sim-control-box">
-            <div class="panel-header">
-                <span>🧪 MANUEL TEST KONTROL PANELI</span>
-            </div>
-            <div class="sim-controls">
-                <button class="btn-sim-act" onclick="triggerSimEvent('package')">📦 Paket Gonder</button>
-                <button class="btn-sim-act" onclick="triggerSimEvent('door')">🚪 Kapı Ac/Kapat Testi</button>
-            </div>
-        </div>
-
-        <!-- ALT TASLAK -->
-        <div class="bottom-sections">
-            <div class="panel-box">
-                <div class="panel-header">
-                    <span>📋 KULLANICI ETKINLIK VE DENETIM LOGLARI (AUDIT TRAIL)</span>
-                    <div class="panel-header-actions">
-                        <input type="text" id="log-search" class="log-search-input" placeholder="Loglarda ara..." onkeyup="filterLogs()">
-                        <button class="btn-export-csv" onclick="exportLogsToCsv()">⬇ CSV Indir</button>
-                        <button class="btn-clear-log" onclick="clearLogs()">Loglari Temizle</button>
-                    </div>
-                </div>
-                <div style="overflow-y: auto; flex: 1; max-height: 220px;">
-                    <table class="log-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 15%;">SAAT</th>
-                                <th style="width: 25%;">KULLANICI / ROL</th>
-                                <th style="width: 20%;">DEPO / KONUM</th>
-                                <th style="width: 40%;">YAPILAN ISLEM / ETKINLIK</th>
-                            </tr>
-                        </thead>
-                        <tbody id="log-tbody">
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="panel-box">
-                <div class="panel-header">SISTEM VE KULLANICI BILGISI</div>
-                <div class="info-row"><span class="info-label">Mimari Katman:</span> <span class="info-value">M2X / REST / MQTT</span></div>
-                <div class="info-row"><span class="info-label">MQTT Broker:</span> <span class="info-value">broker.hivemq.com</span></div>
-                <div class="info-row"><span class="info-label">Toplam Depo:</span> <span class="info-value">5 Depo</span></div>
-                <div class="info-row"><span class="info-label">Kayitli Yöneticiler:</span> <span class="info-value">5 Host</span></div>
-                <div class="info-row"><span class="info-label">Son Oturum Acan:</span> <span class="info-value" id="last-login-user">Henuz yok</span></div>
+        <ul class="nav-links">
+            <li class="active"><a href="#"><i class="fa-solid fa-chart-line"></i> Dashboard</a></li>
+            <li><a href="#"><i class="fa-solid fa-warehouse"></i> Depo Durumu</a></li>
+            <li><a href="#"><i class="fa-solid fa-microchip"></i> Cihaz Yöneticisi</a></li>
+            <li><a href="#"><i class="fa-solid fa-file-lines"></i> Denetim Günlüğü</a></li>
+            <li><a href="#"><i class="fa-solid fa-gear"></i> Ayarlar</a></li>
+        </ul>
+        <div class="connection-card">
+            <div class="status-indicator" id="mqtt-status-indicator"></div>
+            <div class="status-info">
+                <span class="status-label">MQTT Durumu</span>
+                <span class="status-text" id="mqtt-status-text">Bağlanıyor...</span>
             </div>
         </div>
     </div>
 
-    <!-- KROKI VE KONTROL MODALI -->
-    <div id="details-overlay">
-        <div class="details-box">
-            <div class="details-header">
-                <div class="details-header-title">
-                    <h2 id="modal-title">Depo Detayi</h2>
-                    <span id="modal-data-badge" class="data-badge badge-sim">VERI BEKLENIYOR</span>
-                </div>
-                <button class="close-btn" onclick="closeDetails()" aria-label="Kapat">&times;</button>
+    <div class="main-content">
+        <header>
+            <div class="header-title">
+                <h1>Akıllı Depo İzleme ve Yönetim Paneli</h1>
+                <p>ESP32 IoT Sensör ve Cihaz Takip Sistemi</p>
             </div>
-            <div class="details-content">
-                <div class="kroki-pane">
-                    <div class="kroki-label">
-                        ACIK KROKI VE CIHAZ KONUMLARI
-                        <span class="kroki-legend">
-                            <span class="legend-dot legend-on"></span>Acik
-                            <span class="legend-dot legend-off"></span>Kapali
-                        </span>
+            <div class="user-profile">
+                <i class="fa-regular fa-bell"></i>
+                <div class="avatar">DHL</div>
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon temp"><i class="fa-solid fa-temperature-high"></i></div>
+                <div class="stat-details">
+                    <h3>Sıcaklık</h3>
+                    <p class="stat-value" id="val-temp">-- °C</p>
+                    <span class="stat-sub">Hedef: 18 - 24 °C</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon humidity"><i class="fa-solid fa-droplet"></i></div>
+                <div class="stat-details">
+                    <h3>Nem</h3>
+                    <p class="stat-value" id="val-humidity">-- %</p>
+                    <span class="stat-sub">Hedef: %40 - %60</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon distance"><i class="fa-solid fa-ruler-vertical"></i></div>
+                <div class="stat-details">
+                    <h3>Mesafe / Doluluk</h3>
+                    <p class="stat-value" id="val-distance">-- cm</p>
+                    <span class="stat-sub">Depo Yüksekliği: 200 cm</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon door"><i class="fa-solid fa-door-closed"></i></div>
+                <div class="stat-details">
+                    <h3>Kapı Durumu</h3>
+                    <p class="stat-value" id="val-door">--</p>
+                    <span class="stat-sub" id="val-door-time">Son Güncelleme: --</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-body">
+            <div class="controls-section">
+                <h2><i class="fa-solid fa-toggle-on"></i> Uzaktan Cihaz Kontrolü</h2>
+                <div class="control-cards">
+                    <div class="control-card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-mug-hot"></i>
+                            <h3>Kahve Makinesi</h3>
+                        </div>
+                        <p>Depo Mola Alanı Kahve Otomatı</p>
+                        <div class="control-action">
+                            <span class="device-status" id="status-coffee">KAPALI</span>
+                            <label class="switch">
+                                <input type="checkbox" id="toggle-coffee" onchange="toggleDevice('coffee', this.checked)">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
                     </div>
-                    <div class="kroki-area">
-                        <svg class="floorplan-svg" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Depo kroki semasi">
-                        <rect class="room-outline" x="10" y="10" width="380" height="280" rx="6"></rect>
 
-                        <!-- Kapi (sol duvar ortasi) -->
-                        <g id="svg-door-main" class="door-shape device-off">
-                            <rect x="4" y="120" width="14" height="60" rx="2"></rect>
-                            <text x="24" y="155" class="device-label">KAPI</text>
-                        </g>
+                    <div class="control-card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-fan"></i>
+                            <h3>Havalandırma Fanı</h3>
+                        </div>
+                        <p>Depo İklimlendirme Sistemi</p>
+                        <div class="control-action">
+                            <span class="device-status" id="status-fan">KAPALI</span>
+                            <label class="switch">
+                                <input type="checkbox" id="toggle-fan" onchange="toggleDevice('fan', this.checked)">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
 
-                        <!-- Havalandirma Fani -->
-                        <g id="svg-fan" class="device-icon device-off">
-                            <circle cx="100" cy="60" r="22"></circle>
-                            <text x="100" y="102" class="device-label" text-anchor="middle">FAN</text>
-                        </g>
-
-                        <!-- Ofis TV -->
-                        <g id="svg-tv" class="device-icon device-off">
-                            <rect x="270" y="40" width="60" height="38" rx="4"></rect>
-                            <text x="300" y="94" class="device-label" text-anchor="middle">TV</text>
-                        </g>
-
-                        <!-- Mutfak Tost Makinesi -->
-                        <g id="svg-toaster" class="device-icon device-off">
-                            <rect x="70" y="210" width="40" height="30" rx="4"></rect>
-                            <text x="90" y="256" class="device-label" text-anchor="middle">TOST</text>
-                        </g>
-
-                        <!-- Ofis Kahve Makinesi -->
-                        <g id="svg-coffee" class="device-icon device-off">
-                            <rect x="290" y="205" width="34" height="38" rx="4"></rect>
-                            <text x="307" y="258" class="device-label" text-anchor="middle">KAHVE</text>
-                        </g>
-                    </svg>
+                    <div class="control-card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-lightbulb"></i>
+                            <h3>Depo Aydınlatma</h3>
+                        </div>
+                        <p>Ana Depo Alanı LED Panelleri</p>
+                        <div class="control-action">
+                            <span class="device-status" id="status-light">KAPALI</span>
+                            <label class="switch">
+                                <input type="checkbox" id="toggle-light" onchange="toggleDevice('light', this.checked)">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
                     </div>
                 </div>
-                <div class="control-pane">
-                    <div class="sensor-group">
-                        <div class="group-title">ORTAM BILGISI</div>
-                        <div class="ctrl-row"><span>Sicaklik:</span> <strong id="modal-temp">-- °C</strong></div>
-                        <div class="ctrl-row"><span>Nem:</span> <strong id="modal-hum">-- %</strong></div>
+
+                <div class="system-info-box">
+                    <h3><i class="fa-solid fa-circle-info"></i> Sistem Bağlantı Bilgileri</h3>
+                    <div class="info-row">
+                        <span class="info-label">MQTT Broker:</span> 
+                        <span class="info-value">3cfb3fe92a4944b0857c473cc3156d76.s1.eu.hivemq.cloud</span>
                     </div>
-                    <div class="sensor-group">
-                        <div class="group-title">SICAKLIK / NEM GECMISI (Son Olcumler)</div>
-                        <div class="history-chart-wrap">
-                            <canvas id="history-chart"></canvas>
-                        </div>
+                    <div class="info-row">
+                        <span class="info-label">Port / Protokol:</span> 
+                        <span class="info-value">8884 (WSS / Secure WebSockets)</span>
                     </div>
-                    <div class="sensor-group">
-                        <div class="group-title">HAVALANDIRMA</div>
-                        <div class="ctrl-row">
-                            <span>Fan Durumu:</span>
-                            <div class="btn-group">
-                                <span id="m-status-fan" class="status-text text-off">KAPALI</span>
-                                <button class="btn-ctrl btn-on-act" onclick="sendControl('fan', 'ON')">AC</button>
-                                <button class="btn-ctrl btn-off-act" onclick="sendControl('fan', 'OFF')">KAPAT</button>
-                            </div>
-                        </div>
+                    <div class="info-row">
+                        <span class="info-label">Kullanıcı Adı:</span> 
+                        <span class="info-value">dhl</span>
                     </div>
-                    <div class="sensor-group">
-                        <div class="group-title">UZAKTAN KONTROL (HOST)</div>
-                        <div class="ctrl-row">
-                            <span>Ofis - TV:</span>
-                            <div class="btn-group">
-                                <span id="m-status-tv" class="status-text text-off">KAPALI</span>
-                                <button class="btn-ctrl btn-on-act" onclick="sendControl('tv', 'ON')">AC</button>
-                                <button class="btn-ctrl btn-off-act" onclick="sendControl('tv', 'OFF')">KAPAT</button>
-                            </div>
-                        </div>
-                        <div class="ctrl-row">
-                            <span>Mutfak - Tost Mak.:</span>
-                            <div class="btn-group">
-                                <span id="m-status-toaster" class="status-text text-off">KAPALI</span>
-                                <button class="btn-ctrl btn-on-act" onclick="sendControl('toaster', 'ON')">AC</button>
-                                <button class="btn-ctrl btn-off-act" onclick="sendControl('toaster', 'OFF')">KAPAT</button>
-                            </div>
-                        </div>
-                        <div class="ctrl-row">
-                            <span>Ofis - Kahve Mak.:</span>
-                            <div class="btn-group">
-                                <span id="m-status-coffee" class="status-text text-off">KAPALI</span>
-                                <button class="btn-ctrl btn-on-act" onclick="sendControl('coffee', 'ON')">AC</button>
-                                <button class="btn-ctrl btn-off-act" onclick="sendControl('coffee', 'OFF')">KAPAT</button>
-                            </div>
-                        </div>
+                    <div class="info-row">
+                        <span class="info-label">Temel Konu (Base Topic):</span> 
+                        <span class="info-value">lojistik/#</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="log-section">
+                <h2><i class="fa-solid fa-list-check"></i> Denetim Günlüğü (Audit Log)</h2>
+                <div class="log-container" id="audit-log-container">
+                    <div class="log-item log-type-system">
+                        <span class="log-time">Şimdi</span>
+                        <span class="log-msg">Sistem başlatıldı, MQTT bağlantısı kuruluyor...</span>
                     </div>
                 </div>
             </div>
