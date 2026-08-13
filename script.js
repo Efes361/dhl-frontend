@@ -21,7 +21,11 @@ const deviceNames = {
     fan: "Havalandirma Fani",
     toaster: "Mutfak Tost Makinesi",
     coffee: "Ofis Kahve Makinesi",
+    door: "Ana Giris Kapisi",
 };
+
+// Kapi ON/OFF degil OPEN/CLOSE komutuyla calisir (digerlerinden farkli).
+const DOOR_COMMAND_STATES = ["OPEN", "CLOSE"];
 
 const MQTT_CONFIG = {
     host: "broker.hivemq.com",
@@ -57,6 +61,12 @@ const LOGIN_LOCKOUT_CONFIG = {
 
 const HISTORY_MAX_POINTS = 20;
 
+// Sayfa yenilendiginde oturumun acik kalmasi icin tarayici hafizasinda
+// (localStorage) tutulan anahtar. Kullanici manuel olarak cikis
+// yapmadikca (logout) bu kayit silinmez, boylece "yenile" (F5/refresh)
+// tekrar giris ekranina atmaz.
+const SESSION_STORAGE_KEY = "m2x_session_user";
+
 // ============================================================
 // UYGULAMA DURUMU (STATE)
 // ============================================================
@@ -89,6 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initDepotState();
     updateKPICards();
     addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-logout");
+    restoreSession();
 });
 
 // ============================================================
@@ -155,11 +166,15 @@ function loginAsGuest() {
     completeLogin();
 }
 
-function completeLogin() {
-    // Giris bir kullanici tiklamasi oldugu icin AudioContext'i burada
-    // "isitiyoruz" - boylece ilerideki otomatik alarm sesleri tarayicinin
-    // otomatik-oynatma (autoplay) kisitlamasina takilmaz.
-    getAlarmAudioCtx();
+function completeLogin(isRestore = false) {
+    if (!isRestore) {
+        // Giris bir kullanici tiklamasi oldugu icin AudioContext'i burada
+        // "isitiyoruz" - boylece ilerideki otomatik alarm sesleri tarayicinin
+        // otomatik-oynatma (autoplay) kisitlamasina takilmaz. Oturum sayfa
+        // yenilemesinde otomatik geri yuklendiginde (isRestore) kullanici
+        // tiklamasi olmadigi icin bu adim atlanir.
+        getAlarmAudioCtx();
+    }
 
     document.getElementById("login-overlay").style.display = "none";
     document.getElementById("login-error").innerText = "";
@@ -173,7 +188,12 @@ function completeLogin() {
     roleEl.innerText = isHost ? "HOST / ADMIN" : "GUVENLIK (MISAFIR)";
     roleEl.className = `role-tag ${isHost ? "role-host" : "role-guest"}`;
 
-    addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme basariyla oturum acildi", "log-type-login");
+    applyRolePermissions(isHost);
+    saveSession();
+
+    if (!isRestore) {
+        addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme basariyla oturum acildi", "log-type-login");
+    }
 }
 
 function logout() {
@@ -181,7 +201,61 @@ function logout() {
         addAuditLog("Giris Portali", currentUser.name, "Oturum kapatildi", "log-type-logout");
     }
     currentUser = null;
+    clearSession();
     document.getElementById("login-overlay").style.display = "flex";
+}
+
+// ============================================================
+// OTURUM KALICILIGI (sayfa yenilenince tekrar giris istemesin)
+// ============================================================
+
+function saveSession() {
+    try {
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(currentUser));
+    } catch (e) {
+        console.warn("Oturum kaydedilemedi:", e);
+    }
+}
+
+function clearSession() {
+    try {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (e) {
+        console.warn("Oturum temizlenemedi:", e);
+    }
+}
+
+function restoreSession() {
+    let saved = null;
+    try {
+        saved = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY));
+    } catch (e) {
+        saved = null;
+    }
+
+    if (saved && saved.name && saved.role) {
+        currentUser = saved;
+        completeLogin(true);
+    }
+}
+
+// ============================================================
+// ROL BAZLI GORUNURLUK (Misafir/Guvenlik sadece durumu gorsun)
+// ============================================================
+
+function applyRolePermissions(isHost) {
+    // Denetim/audit loglari sadece Host (Admin) kullanicilara acik.
+    const auditPanel = document.getElementById("audit-log-panel");
+    if (auditPanel) auditPanel.style.display = isHost ? "" : "none";
+
+    // Log paneli gizlenince alt bolum duzeni tek sutuna gecsin
+    // (bos/garip bir bosluk kalmasin).
+    const bottomSections = document.getElementById("bottom-sections");
+    if (bottomSections) bottomSections.classList.toggle("bottom-sections-single", !isHost);
+
+    // Manuel test/kontrol paneli de sadece Host icin (Misafir sadece izler).
+    const simPanel = document.getElementById("sim-control-panel");
+    if (simPanel) simPanel.style.display = isHost ? "" : "none";
 }
 
 // ============================================================
@@ -268,7 +342,12 @@ function updateQuickUI(depotKey, type, value) {
 
 function sendControl(device, state) {
     if (!selectedDepotKey || !currentUser || currentUser.role !== "HOST") return;
-    if (!deviceNames[device] || (state !== "ON" && state !== "OFF")) return;
+    if (!deviceNames[device]) return;
+
+    // Kapi OPEN/CLOSE komutu bekler, diger cihazlar (fan/tv/tost/kahve) ON/OFF bekler.
+    const isDoor = device === "door";
+    const validStates = isDoor ? DOOR_COMMAND_STATES : ["ON", "OFF"];
+    if (!validStates.includes(state)) return;
 
     if (!mqttClient || !mqttClient.isConnected()) {
         addAuditLog(selectedDepotKey.toUpperCase(), currentUser.name, "HATA: MQTT baglantisi yok, komut gonderilemedi", "log-type-deny");
@@ -281,10 +360,21 @@ function sendControl(device, state) {
     mqttClient.send(mqttMessage);
 
     const deviceLabel = deviceNames[device] || device;
-    const actionText = state === "ON" ? "CALISTIRILDI (ACILDI)" : "DURDURULDU (KAPATILDI)";
+    let actionText;
+    if (isDoor) {
+        actionText = state === "OPEN" ? "MANUEL OLARAK ACILDI" : "MANUEL OLARAK KAPATILDI";
+    } else {
+        actionText = state === "ON" ? "CALISTIRILDI (ACILDI)" : "DURDURULDU (KAPATILDI)";
+    }
 
     addAuditLog(selectedDepotKey.toUpperCase(), currentUser.name, `KOMUT: ${deviceLabel} -> ${actionText}`, "log-type-cmd");
-    showUserNotification(currentUser.name, selectedDepotKey, device, state);
+    showUserNotification(currentUser.name, selectedDepotKey, device, isDoor ? (state === "OPEN" ? "ON" : "OFF") : state);
+
+    // Kapi icin, sensorden gelecek onayi beklemeden arayuzu de anlik guncelle
+    // (ESP32 tarafi komutu isleyip gercek sensor durumunu geri yayinlayacaktir).
+    if (isDoor) {
+        handleDoorStateChange(selectedDepotKey, state === "OPEN", currentUser.name + " (Manuel Komut)");
+    }
 }
 
 // ============================================================
@@ -764,7 +854,8 @@ function closeDetails() {
 
 function updateModalUI(type, value) {
     const upperValue = value.toUpperCase();
-    const isOn = upperValue === "ON";
+    // Kapi "OPEN/CLOSED", diger cihazlar "ON/OFF" degeriyle gelir.
+    const isOn = type === "door" ? upperValue === "OPEN" : upperValue === "ON";
 
     if (type === "temp") {
         document.getElementById("modal-temp").innerText = `${value} °C`;
@@ -795,7 +886,7 @@ function resetModalValues() {
         if (el) el.innerText = "--";
     });
 
-    ["tv", "toaster", "coffee", "fan"].forEach((device) => {
+    ["tv", "toaster", "coffee", "fan", "door"].forEach((device) => {
         const statusEl = document.getElementById(`m-status-${device}`);
         if (statusEl) {
             statusEl.innerText = "KAPALI";
