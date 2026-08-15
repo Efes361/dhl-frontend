@@ -41,7 +41,7 @@ const MQTT_CONFIG = {
     username: "DHL",
     password: "DHL12345",
     clientId: "dhl_m2x_monitor_" + Math.random().toString(16).slice(2, 8),
-    baseTopic: "lojistik",
+    baseTopic: "depo",
     reconnectDelayMs: 5000,
 };
 
@@ -313,6 +313,11 @@ function onMessageArrived(message) {
             if (!Number.isNaN(numeric)) depotSimState[depotKey][type] = numeric;
         } else if (type === "door") {
             depotSimState[depotKey].doorOpen = payload.toUpperCase() === "OPEN";
+        } else if (deviceNames[type]) {
+            if (!depotSimState[depotKey].devices) {
+                depotSimState[depotKey].devices = { tv: false, fan: false, toaster: false, coffee: false };
+            }
+            depotSimState[depotKey].devices[type] = payload.toUpperCase() === "ON";
         }
     }
 
@@ -376,6 +381,16 @@ function sendControl(device, state) {
 
     if (isDoor) {
         handleDoorStateChange(selectedDepotKey, state === "OPEN", currentUser.name + " (Manuel Komut)");
+    } else {
+        // Fiziksel cihazdan MQTT echo/onay beklemeden, komutu hemen yerel
+        // durumda ve modal arayuzunde yansit (kroki kapanip acilinca
+        // durumun sifirlanmamasi icin).
+        const simState = depotSimState[selectedDepotKey];
+        if (simState) {
+            if (!simState.devices) simState.devices = { tv: false, fan: false, toaster: false, coffee: false };
+            simState.devices[device] = state === "ON";
+        }
+        updateModalUI(device, state);
     }
 }
 
@@ -723,6 +738,7 @@ function initDepotState() {
             temp: null,
             hum: null,
             doorOpen: false,
+            devices: { tv: false, fan: false, toaster: false, coffee: false },
         };
         updateLiveBadge(depotKey, false);
     });
@@ -810,6 +826,15 @@ function openDetails(depotKey, title) {
     if (state && state.live) {
         if (typeof state.temp === "number") updateModalUI("temp", state.temp.toFixed(1));
         if (typeof state.hum === "number") updateModalUI("hum", Math.round(state.hum).toString());
+    }
+
+    if (state) {
+        updateModalUI("door", state.doorOpen ? "OPEN" : "CLOSE");
+        if (state.devices) {
+            Object.keys(state.devices).forEach((device) => {
+                updateModalUI(device, state.devices[device] ? "ON" : "OFF");
+            });
+        }
     }
 
     renderHistoryChart(depotKey);
