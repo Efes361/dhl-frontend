@@ -28,9 +28,18 @@ const deviceNames = {
 const DOOR_COMMAND_STATES = ["OPEN", "CLOSE"];
 
 const MQTT_CONFIG = {
-    host: "broker.hivemq.com",
+    // Kendi HiveMQ Cloud broker'imiz (once herkese acik broker.hivemq.com
+    // kullaniliyordu, artik ozel/sifreli kendi sunucumuza baglaniyoruz).
+    host: "0f93d5b64063469cae8d04c685c21dfb.s1.eu.hivemq.cloud",
+    // NOT: HiveMQ Cloud'da tarayicidan (WebSocket/Paho) baglanmak icin
+    // genelde 8884 (WSS) portu kullanilir, 8883 native TCP/TLS icindir ve
+    // tarayicidan calismaz. HiveMQ Cloud panelindeki "Web Client" /
+    // baglanti detaylarindan WebSocket portunu dogrulayip gerekirse
+    // buradaki degeri degistir.
     port: 8884,
     useSSL: true,
+    username: "DHL",
+    password: "DHL12345",
     clientId: "dhl_m2x_monitor_" + Math.random().toString(16).slice(2, 8),
     baseTopic: "lojistik",
     reconnectDelayMs: 5000,
@@ -267,6 +276,9 @@ function initMqttClient() {
 
     mqttClient.connect({
         useSSL: MQTT_CONFIG.useSSL,
+        // Ozel/sifreli HiveMQ Cloud broker'i icin kullanici adi/sifre.
+        userName: MQTT_CONFIG.username,
+        password: MQTT_CONFIG.password,
         onSuccess: () => {
             updateMqttStatus(true);
             mqttClient.subscribe(`${MQTT_CONFIG.baseTopic}/#`);
