@@ -75,13 +75,10 @@ select:focus-visible,
 }
 
 .login-header .dhl-logo-img {
-    display: block;
-    margin: 0 auto 8px;
-    background: var(--dhl-yellow);
-    padding: 6px 22px;
-    border-radius: 6px;
-    height: 64px;
+    display: inline-block;
+    height: 60px;
     width: auto;
+    border-radius: 6px;
 }
 
 .login-header h2 {
@@ -202,14 +199,9 @@ header {
 }
 
 .dhl-logo-img {
-    height: 46px;
+    height: 50px;
     width: auto;
     display: block;
-    border-radius: 4px;
-}
-
-.dhl-logo-img-header {
-    height: 56px;
 }
 
 .header-title {
@@ -296,20 +288,27 @@ header {
 .role-guest { background: #6c757d; }
 
 .btn-logout {
-    background: var(--dhl-red);
-    color: white;
+    background: none;
     border: none;
-    padding: 5px 14px;
-    border-radius: 15px;
     cursor: pointer;
-    font-size: 0.75rem;
-    font-weight: bold;
-    white-space: nowrap;
-    transition: background 0.2s, transform 0.1s;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--dhl-red);
+    padding: 2px;
+    border-radius: 4px;
+    transition: background 0.2s;
 }
 
-.btn-logout:hover { background: #b5202f; }
-.btn-logout:active { transform: scale(0.96); }
+.btn-logout:hover {
+    background: rgba(212, 5, 17, 0.1);
+}
+
+.logout-icon {
+    width: 18px;
+    height: 18px;
+}
 
 .mqtt-status {
     font-size: 0.8rem;
@@ -509,12 +508,6 @@ header {
     gap: 20px;
     flex: 1;
     min-height: 240px;
-}
-
-/* Denetim/audit log paneli gizli oldugunda (Misafir/Guvenlik rolu)
-   kalan tek panel tam genislik kaplasin, bos sutun kalmasin. */
-.bottom-sections.bottom-sections-single {
-    grid-template-columns: 1fr;
 }
 
 .panel-box {
@@ -781,6 +774,30 @@ header {
 }
 
 .notify-box.show { transform: translateX(0); }
+
+/* --- ROLE GORE GORUNURLUK (GUVENLIK / MISAFIR KISITLI GORUNUM) ---
+   Misafir (Guvenlik Gorevlisi) rolu ile giris yapildiginda body'e
+   "guest-view" sinifi eklenir. Bu durumda denetim loglari, sistem
+   bilgisi ve simulasyon/test kontrol paneli tamamen gizlenir; sadece
+   depo durumlari ve KPI kartlari gorunur kalir. */
+.guest-only-panel {
+    display: none;
+}
+
+body.guest-view .host-only-panel {
+    display: none !important;
+}
+
+body.guest-view .guest-only-panel {
+    display: flex;
+    grid-column: 1 / -1;
+}
+
+.guest-info-text {
+    font-size: 0.85rem;
+    color: #777;
+    line-height: 1.6;
+}
 
 /* DUYARLILIK (RESPONSIVE) */
 @media (max-width: 1100px) {

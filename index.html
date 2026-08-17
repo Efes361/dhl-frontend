@@ -1,58 +1,26 @@
 <!DOCTYPE html>
-<!--
-    ================================================================
-    DHL M2X DEPO YONETIM PANELI - index.html
-    ================================================================
-    Bu dosya sayfanin GORUNEN YAPISINI (iskelet/HTML) icerir.
-    Tasarim/renkler  -> style.css
-    Calisma mantigi   -> script.js  (butonlara basinca ne olacagi,
-                          MQTT baglantisi, hesaplamalar, vs. hep orada)
-
-    Sayfa kabaca su bloklardan olusuyor (yukaridan asagiya):
-      1) LOGIN MODALI      -> Giris ekrani (Host sifre / Misafir)
-      2) BILDIRIM ALANI    -> Sag ustte cikan kucuk bildirimler
-      3) UST BANT (HEADER) -> Logo, tema/alarm butonlari, kullanici rozeti
-      4) ANA TASLAK        -> KPI kartlari + 5 depo karti + test paneli
-      5) ALT BOLUM         -> Audit log tablosu + sistem bilgisi kutusu
-      6) DETAY MODALI      -> Bir depoya tiklaninca acilan kroki/kontrol ekrani
-    ================================================================
--->
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DHL M2X Depo Yönetim | Canli Takip</title>
-
-    <!-- Paho MQTT Kütüphanesi: ESP32/Wokwi cihazlarindan gelen canli
-         sicaklik/nem/kapi verisini tarayiciya ulastiran baglanti kütüphanesi -->
+    <!-- Paho MQTT Kütüphanesi -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
-
-    <!-- Chart.js: depo detay ekranindaki sicaklik/nem gecmis grafigini cizmek icin -->
+    <!-- Chart.js: depo sicaklik/nem gecmis grafigi ve genel trendler icin -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-
-    <!-- Harici CSS Dosyası: tum renk/boyut/yerlesim kurallari burada -->
+    <!-- Harici CSS Dosyası -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- ================================================================
-         1) GIRIS (LOGIN) MODALI
-         Sayfa acildiginda en onde gorunen ekran budur (style.css'te
-         #login-overlay display:flex ile tam ekran kaplar).
-         - Ust kisim: Host (Admin) sifre ile giris formu
-         - Alt kisim: Guvenlik/Misafir girisi (sadece izleme, sifresiz)
-         Basariyla giris yapilinca script.js bu kutuyu gizler (display:none).
-         ================================================================ -->
+    <!-- GIRIS (LOGIN) MODALI -->
     <div id="login-overlay">
         <div class="login-card">
             <div class="login-header">
-                <img src="dhl-logo.jpg" alt="DHL Logo" class="dhl-logo-img dhl-logo-img-login">
+                <img src="dhl-logo.jpg" alt="DHL" class="dhl-logo-img">
                 <h2>M2X Depo Giris Portali</h2>
             </div>
 
-            <!-- Host/Admin giris formu: kullanici secilir + sifre girilir.
-                 submit olunca script.js -> handleLogin(event) calisir,
-                 sifreyi SHA-256 ile hash'leyip hostUsers listesiyle karsilastirir. -->
             <form id="login-form" onsubmit="handleLogin(event)">
                 <div class="form-group">
                     <label for="username-select">Yonetici Secin (Host):</label>
@@ -70,7 +38,6 @@
                     <input type="password" id="password-input" class="login-input" placeholder="Sifrenizi giriniz" autocomplete="current-password">
                 </div>
 
-                <!-- Hatali sifre / kilitlenme mesajlari buraya yazilir (script.js) -->
                 <div id="login-error" class="login-error" role="alert"></div>
 
                 <button type="submit" class="btn-login">Giris Yap (Host / Admin)</button>
@@ -78,63 +45,46 @@
 
             <div class="login-divider"><span>VEYA</span></div>
 
-            <!-- Misafir/Guvenlik girisi: sifre gerekmez, tiklaninca
-                 script.js -> loginAsGuest() calisir. Bu rolde kullanici
-                 sadece durumu izler; kroki/kontrol ve loglar gizlidir. -->
             <button type="button" class="btn-guest" onclick="loginAsGuest()">
                 🛡️ Guvenlik Gorevlisi / Misafir Girisi (Sadece Izleme)
             </button>
         </div>
     </div>
 
-    <!-- ================================================================
-         2) BILDIRIM ALANI (Sag Ust)
-         Bir cihaz acilip kapandiginda ya da alarm tetiklendiginde
-         script.js buraya kucuk "toast" bildirimleri ekler/kaldirir.
-         ================================================================ -->
+    <!-- BILDIRIM ALANI (Sag Ust) -->
     <div id="notification-area" aria-live="polite"></div>
 
-    <!-- ================================================================
-         3) UST BANT (HEADER)
-         Sol: DHL logosu + baslik
-         Sag: Tema/alarm butonlari, MQTT baglanti durumu ve giris yapan
-              kullanicinin adi/rolu + "Giris Yap" (cikis/kullanici degistir) butonu
-         ================================================================ -->
+    <!-- UST BANT -->
     <header>
         <div class="logo-area">
-            <img src="dhl-logo.jpg" alt="DHL Logo" class="dhl-logo-img dhl-logo-img-header">
+            <img src="dhl-logo.jpg" alt="DHL" class="dhl-logo-img">
             <span class="header-title">DHL M2X Depo Yonetim</span>
         </div>
         <div class="status-area">
-            <!-- Acik/koyu tema gecisi (script.js -> toggleTheme) -->
             <button class="btn-theme-toggle" onclick="toggleTheme()" id="theme-btn">🌙 Gece Modu</button>
-            <!-- Alarm sesini elle test etmek icin (script.js -> testAlarmSound) -->
             <button class="btn-test-alarm" onclick="testAlarmSound()" title="Alarm sesini test et">🚨 Alarm Sesini Test Et</button>
-            <!-- Alarm sesini sustur/ac (script.js -> toggleAlarmMute) -->
             <button id="btn-alarm-mute" class="btn-alarm-mute" onclick="toggleAlarmMute()" title="Alarm Sesi Acik (kapatmak icin tikla)">🔊</button>
-            <!-- MQTT baglanti durumu (Baglaniyor / Bagli / Koptu) script.js tarafindan guncellenir -->
             <span id="mqtt-status" class="mqtt-status">MQTT: Baglaniyor...</span>
 
             <!-- AKTIF KULLANICI / ROL ROZETI -->
             <div class="user-badge">
                 <span id="active-user-name">Giris Yapilmadi</span>
                 <span id="active-user-role" class="role-tag">--</span>
-                <!-- Kullanici degistirmek / cikis yapmak icin: tiklaninca
-                     script.js -> logout() calisir ve tekrar login ekrani acilir -->
-                <button class="btn-logout" onclick="logout()" title="Kullanici Degistir / Giris Yap" aria-label="Kullanici Degistir / Giris Yap">Giris Yap</button>
+                <button class="btn-logout" onclick="logout()" title="Cikis Yap" aria-label="Cikis Yap">
+                    <svg viewBox="0 0 24 24" class="logout-icon" aria-hidden="true">
+                        <path d="M10 3.5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M15.5 16.5 20 12l-4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        <line x1="20" y1="12" x2="9" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                    </svg>
+                </button>
             </div>
         </div>
     </header>
 
-    <!-- ================================================================
-         4) ANA TASLAK
-         KPI kartlari + 5 depo karti + (sadece Host'a acik) test paneli
-         ================================================================ -->
+    <!-- ANA TASLAK -->
     <div id="main-content">
 
-        <!-- KPI METRIK PANELİ (A.1): ust siradaki 4 ozet kart.
-             Degerler (kpi-total-packages, kpi-avg-temp, kpi-alarm-status...)
-             script.js tarafindan canli olarak guncellenir. -->
+        <!-- KPI METRIK PANELİ (A.1) -->
         <div class="kpi-container">
             <div class="kpi-card">
                 <div class="kpi-title">TOPLAM İŞLENEN PAKET</div>
@@ -158,20 +108,13 @@
             </div>
         </div>
 
-        <!-- UST 5'LI DEPO GRID
-             Her kart bir depoyu temsil eder. Uzerine tiklaninca
-             script.js -> handleDepotClick(depotKey, title) calisir:
-               - HOST ise: kroki/kontrol modalini acar
-               - GUEST ise: uyari verir, modal ACILMAZ (sadece bu karttaki
-                 ozet sicaklik/nem/kapi durumunu gorebilir)
-             id="badge-..." canli/simule veri rozeti,
-             id="door-..." kapi acik/kapali etiketi - hepsi script.js'ten guncellenir. -->
+        <!-- UST 5'LI DEPO GRID -->
         <div class="depot-grid">
             <!-- 1. Esenyurt -->
             <div class="depot-card" id="card-esenyurt" onclick="handleDepotClick('esenyurt', 'Esenyurt Lojistik M.')">
                 <div class="card-top-row">
                     <h3>ESENYURT</h3>
-                    <span id="badge-esenyurt" class="data-badge badge-sim">VERI BEKLENIYOR</span>
+                    <span id="badge-esenyurt" class="data-badge badge-sim">SIMULASYON</span>
                 </div>
                 <p>Istanbul Avrupa</p>
                 <div class="quick-metrics">
@@ -184,7 +127,7 @@
             <div class="depot-card" id="card-gebze" onclick="handleDepotClick('gebze', 'Gebze Lojistik M.')">
                 <div class="card-top-row">
                     <h3>GEBZE</h3>
-                    <span id="badge-gebze" class="data-badge badge-sim">VERI BEKLENIYOR</span>
+                    <span id="badge-gebze" class="data-badge badge-sim">SIMULASYON</span>
                 </div>
                 <p>Kocaeli / Marmara</p>
                 <div class="quick-metrics">
@@ -197,7 +140,7 @@
             <div class="depot-card" id="card-tuzla" onclick="handleDepotClick('tuzla', 'Tuzla (Asya 1) Lojistik M.')">
                 <div class="card-top-row">
                     <h3>TUZLA</h3>
-                    <span id="badge-tuzla" class="data-badge badge-sim">VERI BEKLENIYOR</span>
+                    <span id="badge-tuzla" class="data-badge badge-sim">SIMULASYON</span>
                 </div>
                 <p>Istanbul Anadolu</p>
                 <div class="quick-metrics">
@@ -210,7 +153,7 @@
             <div class="depot-card" id="card-orhanli" onclick="handleDepotClick('orhanli', 'Orhanli Lojistik M.')">
                 <div class="card-top-row">
                     <h3>ORHANLI</h3>
-                    <span id="badge-orhanli" class="data-badge badge-sim">VERI BEKLENIYOR</span>
+                    <span id="badge-orhanli" class="data-badge badge-sim">SIMULASYON</span>
                 </div>
                 <p>Istanbul Anadolu</p>
                 <div class="quick-metrics">
@@ -223,7 +166,7 @@
             <div class="depot-card" id="card-hadimkoy" onclick="handleDepotClick('hadimkoy', 'Hadimkoy Lojistik M.')">
                 <div class="card-top-row">
                     <h3>HADIMKOY</h3>
-                    <span id="badge-hadimkoy" class="data-badge badge-sim">VERI BEKLENIYOR</span>
+                    <span id="badge-hadimkoy" class="data-badge badge-sim">SIMULASYON</span>
                 </div>
                 <p>Istanbul Avrupa</p>
                 <div class="quick-metrics">
@@ -234,34 +177,22 @@
             </div>
         </div>
 
-        <!-- MANUEL TEST PANELI (Gercek ESP32/Wokwi verisi baglanmadan once test icin)
-             Bu panel SADECE HOST kullanicilara gorunur - script.js icindeki
-             applyRolePermissions() fonksiyonu Misafir/Guvenlik girisinde
-             bu kutuyu (id="sim-control-panel") gizler. -->
-        <div class="panel-box sim-control-box" id="sim-control-panel">
+        <!-- SIMULASYON KONTROL VE HIZLI TEST PANELI (E.3) -->
+        <div class="panel-box sim-control-box host-only-panel">
             <div class="panel-header">
-                <span>🧪 MANUEL TEST KONTROL PANELI</span>
+                <span>⚡ CANLI SIMULASYON VE TEST KONTROL PANELI</span>
             </div>
             <div class="sim-controls">
-                <!-- Sahte bir paket islenmis gibi KPI sayacini artirir -->
                 <button class="btn-sim-act" onclick="triggerSimEvent('package')">📦 Paket Gonder</button>
-                <!-- Rastgele bir deponun kapisini ac/kapat gibi simule eder -->
-                <button class="btn-sim-act" onclick="triggerSimEvent('door')">🚪 Kapı Ac/Kapat Testi</button>
+                <button class="btn-sim-act" onclick="triggerSimEvent('alarm')">🚨 Yapay Alarm Uret</button>
+                <button class="btn-sim-act" onclick="triggerSimEvent('door')">🚪 Kapı Ac/Kapat Simule Et</button>
+                <button class="btn-sim-act btn-sim-danger" onclick="triggerSimEvent('toggle_sim')">⏯️ Simulasyonu Durdur/Baslat</button>
             </div>
         </div>
 
-        <!-- ================================================================
-             5) ALT BOLUM
-             Sol: Denetim/Audit log tablosu (SADECE HOST'a acik)
-             Sag: Sabit sistem bilgisi kutusu (herkese acik)
-             ================================================================ -->
-        <div class="bottom-sections" id="bottom-sections">
-            <!-- KULLANICI ETKINLIK VE DENETIM LOGLARI (AUDIT TRAIL)
-                 Kim, ne zaman, hangi depoda, ne yapti - hepsi buraya duser
-                 (script.js -> addAuditLog fonksiyonu ile eklenir).
-                 id="audit-log-panel": Misafir/Guvenlik girisinde script.js
-                 tarafindan gizlenir (display:none), sadece Host gorebilir. -->
-            <div class="panel-box" id="audit-log-panel">
+        <!-- ALT TASLAK -->
+        <div class="bottom-sections">
+            <div class="panel-box host-only-panel">
                 <div class="panel-header">
                     <span>📋 KULLANICI ETKINLIK VE DENETIM LOGLARI (AUDIT TRAIL)</span>
                     <div class="panel-header-actions">
@@ -280,14 +211,12 @@
                                 <th style="width: 40%;">YAPILAN ISLEM / ETKINLIK</th>
                             </tr>
                         </thead>
-                        <!-- Her yeni log satiri buraya JS ile en usten eklenir -->
                         <tbody id="log-tbody">
                         </tbody>
                     </table>
                 </div>
             </div>
-            <!-- SISTEM VE KULLANICI BILGISI: sabit/genel bilgiler, herkese acik -->
-            <div class="panel-box">
+            <div class="panel-box host-only-panel">
                 <div class="panel-header">SISTEM VE KULLANICI BILGISI</div>
                 <div class="info-row"><span class="info-label">Mimari Katman:</span> <span class="info-value">M2X / REST / MQTT</span></div>
                 <div class="info-row"><span class="info-label">MQTT Broker:</span> <span class="info-value">broker.hivemq.com</span></div>
@@ -295,22 +224,24 @@
                 <div class="info-row"><span class="info-label">Kayitli Yöneticiler:</span> <span class="info-value">5 Host</span></div>
                 <div class="info-row"><span class="info-label">Son Oturum Acan:</span> <span class="info-value" id="last-login-user">Henuz yok</span></div>
             </div>
+            <div class="panel-box guest-only-panel">
+                <div class="panel-header">🛡️ GUVENLIK / MISAFIR GORUNUMU</div>
+                <p class="guest-info-text">
+                    Bu oturumda yalnizca depolarin anlik sicaklik, nem ve kapi durumlarini
+                    izleyebilirsiniz. Denetim loglarina, kroki/cihaz kontrollerine ve
+                    simulasyon panellerine erisim Host (Admin) kullanicilariyla sinirlidir.
+                </p>
+            </div>
         </div>
     </div>
 
-    <!-- ================================================================
-         6) KROKI VE KONTROL MODALI
-         Bir depo kartina tiklanip (sadece Host icin) acilan detay ekrani.
-         Sol: depo krokisi (kapi/fan/tv/tost/kahve ikonlari - acik/kapali
-              renklerine gore stil degistirir)
-         Sag: sicaklik/nem bilgisi + gecmis grafik + AC/KAPAT kontrol butonlari
-         ================================================================ -->
+    <!-- KROKI VE KONTROL MODALI -->
     <div id="details-overlay">
         <div class="details-box">
             <div class="details-header">
                 <div class="details-header-title">
                     <h2 id="modal-title">Depo Detayi</h2>
-                    <span id="modal-data-badge" class="data-badge badge-sim">VERI BEKLENIYOR</span>
+                    <span id="modal-data-badge" class="data-badge badge-sim">SIMULE VERI</span>
                 </div>
                 <button class="close-btn" onclick="closeDetails()" aria-label="Kapat">&times;</button>
             </div>
@@ -371,25 +302,6 @@
                             <canvas id="history-chart"></canvas>
                         </div>
                     </div>
-                    <!-- KAPI KONTROLU: kapi normalde ESP32 uzerindeki ultrasonik
-                         mesafe sensorunden otomatik acilir/kapanir (sensor belirli
-                         bir mesafenin altina bir nesne/kisi algilayinca OPEN sinyali
-                         yollar). Bu mesafe esigi bu web dosyalarinda DEGIL, ESP32/
-                         Wokwi tarafindaki sensor kodunda (.ino) tanimlidir. Buradaki
-                         AC/KAPAT butonlari ise Host'un kapiyi MANUEL olarak
-                         MQTT uzerinden kontrol etmesini saglar (lojistik/{depo}/door/set
-                         konusuna "OPEN" / "CLOSE" mesaji yollanir). -->
-                    <div class="sensor-group">
-                        <div class="group-title">GIRIS KAPISI (UZAKTAN AC / KAPAT)</div>
-                        <div class="ctrl-row">
-                            <span>Kapi Durumu:</span>
-                            <div class="btn-group">
-                                <span id="m-status-door" class="status-text text-off">KAPALI</span>
-                                <button class="btn-ctrl btn-on-act" onclick="sendControl('door', 'OPEN')">AC</button>
-                                <button class="btn-ctrl btn-off-act" onclick="sendControl('door', 'CLOSE')">KAPAT</button>
-                            </div>
-                        </div>
-                    </div>
                     <div class="sensor-group">
                         <div class="group-title">HAVALANDIRMA</div>
                         <div class="ctrl-row">
@@ -433,7 +345,6 @@
         </div>
     </div>
 
-    <!-- Tum calisma mantigi (buton tiklamalari, MQTT, hesaplamalar) burada -->
     <script src="script.js"></script>
 </body>
 </html>

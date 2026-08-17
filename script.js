@@ -21,33 +21,30 @@ const deviceNames = {
     fan: "Havalandirma Fani",
     toaster: "Mutfak Tost Makinesi",
     coffee: "Ofis Kahve Makinesi",
-    door: "Ana Giris Kapisi",
 };
 
-// Kapi ON/OFF degil OPEN/CLOSE komutuyla calisir (digerlerinden farkli).
-const DOOR_COMMAND_STATES = ["OPEN", "CLOSE"];
-
 const MQTT_CONFIG = {
-    // Kendi HiveMQ Cloud broker'imiz (once herkese acik broker.hivemq.com
-    // kullaniliyordu, artik ozel/sifreli kendi sunucumuza baglaniyoruz).
-    host: "0f93d5b64063469cae8d04c685c21dfb.s1.eu.hivemq.cloud",
-    // NOT: HiveMQ Cloud'da tarayicidan (WebSocket/Paho) baglanmak icin
-    // genelde 8884 (WSS) portu kullanilir, 8883 native TCP/TLS icindir ve
-    // tarayicidan calismaz. HiveMQ Cloud panelindeki "Web Client" /
-    // baglanti detaylarindan WebSocket portunu dogrulayip gerekirse
-    // buradaki degeri degistir.
+    host: "broker.hivemq.com",
     port: 8884,
     useSSL: true,
-    username: "DHL",
-    password: "DHL12345",
     clientId: "dhl_m2x_monitor_" + Math.random().toString(16).slice(2, 8),
-    baseTopic: "depo",
+    baseTopic: "lojistik",
     reconnectDelayMs: 5000,
 };
 
 const MAX_LOG_ROWS = 50;
 const NOTIFICATION_VISIBLE_MS = 3000;
 const DEPOT_KEYS = ["esenyurt", "gebze", "tuzla", "orhanli", "hadimkoy"];
+
+const SIMULATION_CONFIG = {
+    tickMs: 4000,
+    tempMin: 16, tempMax: 29,
+    humMin: 28, humMax: 72,
+    tempStepMax: 0.5,
+    humStepMax: 2.5,
+    doorOpenChance: 0.03,
+    doorAutoCloseTicks: 2,
+};
 
 const ALARM_THRESHOLDS = {
     tempMin: 10,
@@ -56,7 +53,9 @@ const ALARM_THRESHOLDS = {
     humMax: 75,
 };
 
-// Kapi 5 dakika kesintisiz acik kalirsa alarm calsin (her acilip kapanmada degil).
+// Kapi 5 dakika kesintisiz acik kalirsa alarm calsin (her acilip
+// kapanmada degil). Test etmek icin bu degeri gecici olarak
+// kucultebilirsin (orn. 5000 = 5 saniye).
 const DOOR_ALARM_CONFIG = {
     thresholdMs: 5 * 60 * 1000, // 5 dakika
 };
@@ -66,10 +65,14 @@ const LOGIN_LOCKOUT_CONFIG = {
     lockoutMs: 30000,
 };
 
-const HISTORY_MAX_POINTS = 20;
+// Oturum sayfa yenilendiginde kaybolmasin diye tarayicida saklanir.
+// Guvenlik icin sinirsiz degil; bu sure dolunca tekrar giris istenir.
+const SESSION_CONFIG = {
+    storageKey: "dhl_m2x_session",
+    maxAgeMs: 12 * 60 * 60 * 1000, // 12 saat
+};
 
-// Sayfa yenilendiginde oturumun acik kalmasi icin tarayici hafizasinda tutulan anahtar.
-const SESSION_STORAGE_KEY = "m2x_session_user";
+const HISTORY_MAX_POINTS = 20;
 
 // ============================================================
 // UYGULAMA DURUMU (STATE)
@@ -78,8 +81,9 @@ const SESSION_STORAGE_KEY = "m2x_session_user";
 let currentUser = null;
 let selectedDepotKey = null;
 let mqttClient = null;
+let isSimulationActive = true;
 
-let totalPackagesProcessed = 1240; // KPI Paket Sayaci
+let totalPackagesProcessed = 1240; // KPI Simule Paket Sayaci
 
 const depotSimState = {};
 const depotAlarmState = {};
@@ -100,18 +104,11 @@ let alarmSoundMuted = false;
 
 document.addEventListener("DOMContentLoaded", () => {
     initMqttClient();
-    initDepotState();
+    initSensorSimulation();
     updateKPICards();
     addAuditLog("Sistem", "Otomasyon", "DHL M2X Izleme paneli baslatildi", "log-type-logout");
-    restoreSession();
+    tryRestoreSession();
 });
-
-// Tarayici otomatik ses oynatma kisitlamasini ilk tiklamada kaldırma
-document.addEventListener("click", () => {
-    if (alarmAudioCtx && alarmAudioCtx.state === "suspended") {
-        alarmAudioCtx.resume();
-    }
-}, { once: true });
 
 // ============================================================
 // YARDIMCI: SIFRE HASH'LEME & GENEL YARDIMCILAR
@@ -177,8 +174,15 @@ function loginAsGuest() {
     completeLogin();
 }
 
-function completeLogin(isRestore = false) {
-    if (!isRestore) {
+function completeLogin(options = {}) {
+    const fromSession = !!options.fromSession;
+
+    if (!fromSession) {
+        // Giris bir kullanici tiklamasi oldugu icin AudioContext'i burada
+        // "isitiyoruz" - boylece ilerideki otomatik alarm sesleri tarayicinin
+        // otomatik-oynatma (autoplay) kisitlamasina takilmaz. Kayitli
+        // oturumdan otomatik giriste kullanici etkilesimi olmadigi icin
+        // bu adim atlanir; ilk tiklamada (orn. alarm test butonu) acilir.
         getAlarmAudioCtx();
     }
 
@@ -194,12 +198,15 @@ function completeLogin(isRestore = false) {
     roleEl.innerText = isHost ? "HOST / ADMIN" : "GUVENLIK (MISAFIR)";
     roleEl.className = `role-tag ${isHost ? "role-host" : "role-guest"}`;
 
-    applyRolePermissions(isHost);
-    saveSession();
+    applyRoleView(currentUser.role);
+    saveSession(currentUser);
 
-    if (!isRestore) {
-        addAuditLog("Giris Portali", `${currentUser.name} [${currentUser.role}]`, "Sisteme basariyla oturum acildi", "log-type-login");
-    }
+    addAuditLog(
+        "Giris Portali",
+        `${currentUser.name} [${currentUser.role}]`,
+        fromSession ? "Kayitli oturum hatirlandi (sayfa yenilendi)" : "Sisteme basariyla oturum acildi",
+        "log-type-login"
+    );
 }
 
 function logout() {
@@ -208,60 +215,64 @@ function logout() {
     }
     currentUser = null;
     clearSession();
+    document.body.classList.remove("guest-view");
     document.getElementById("login-overlay").style.display = "flex";
 }
 
 // ============================================================
-// OTURUM KALICILIGI
+// OTURUM KALICILIGI (SAYFA YENILENINCE TEKRAR GIRIS ISTEMEMESI)
 // ============================================================
 
-function saveSession() {
+// Yalnizca isim/rol/zaman damgasi saklanir; sifre veya hash ASLA
+// localStorage'a yazilmaz.
+function saveSession(user) {
     try {
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(currentUser));
+        localStorage.setItem(
+            SESSION_CONFIG.storageKey,
+            JSON.stringify({ name: user.name, role: user.role, ts: Date.now() })
+        );
     } catch (e) {
-        console.warn("Oturum kaydedilemedi:", e);
+        // localStorage kapali/erisilemez olabilir (orn. gizli sekme) - sessizce yoksay
     }
 }
 
 function clearSession() {
     try {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
+        localStorage.removeItem(SESSION_CONFIG.storageKey);
     } catch (e) {
-        console.warn("Oturum temizlenemedi:", e);
+        // yoksay
     }
 }
 
-function restoreSession() {
+function tryRestoreSession() {
     let saved = null;
     try {
-        saved = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY));
+        const raw = localStorage.getItem(SESSION_CONFIG.storageKey);
+        if (raw) saved = JSON.parse(raw);
     } catch (e) {
         saved = null;
     }
 
-    if (saved && saved.name && saved.role) {
-        currentUser = saved;
-        completeLogin(true);
+    if (!saved || !saved.name || !saved.role || !saved.ts) return;
+
+    const isExpired = Date.now() - saved.ts > SESSION_CONFIG.maxAgeMs;
+    if (isExpired) {
+        clearSession();
+        return;
     }
+
+    currentUser = { name: saved.name, role: saved.role };
+    completeLogin({ fromSession: true });
+}
+
+// Misafir (Guvenlik) rolunde loglar, sistem bilgisi ve simulasyon/test
+// kontrol paneli tamamen gizlenir; sadece depo durumlari goruntulenir.
+function applyRoleView(role) {
+    document.body.classList.toggle("guest-view", role !== "HOST");
 }
 
 // ============================================================
-// ROL BAZLI GORUNURLUK
-// ============================================================
-
-function applyRolePermissions(isHost) {
-    const auditPanel = document.getElementById("audit-log-panel");
-    if (auditPanel) auditPanel.style.display = isHost ? "" : "none";
-
-    const bottomSections = document.getElementById("bottom-sections");
-    if (bottomSections) bottomSections.classList.toggle("bottom-sections-single", !isHost);
-
-    const simPanel = document.getElementById("sim-control-panel");
-    if (simPanel) simPanel.style.display = isHost ? "" : "none";
-}
-
-// ============================================================
-// MQTT BAGLANTI VE KOMUT YONETIMI
+// MQTT BAGLANTI YONETIMI
 // ============================================================
 
 function initMqttClient() {
@@ -276,9 +287,6 @@ function initMqttClient() {
 
     mqttClient.connect({
         useSSL: MQTT_CONFIG.useSSL,
-        // Ozel/sifreli HiveMQ Cloud broker'i icin kullanici adi/sifre.
-        userName: MQTT_CONFIG.username,
-        password: MQTT_CONFIG.password,
         onSuccess: () => {
             updateMqttStatus(true);
             mqttClient.subscribe(`${MQTT_CONFIG.baseTopic}/#`);
@@ -307,20 +315,6 @@ function onMessageArrived(message) {
     checkThresholds(depotKey, type, payload);
     recordHistory(depotKey, type, payload);
 
-    if (depotSimState[depotKey]) {
-        if (type === "temp" || type === "hum") {
-            const numeric = parseFloat(payload);
-            if (!Number.isNaN(numeric)) depotSimState[depotKey][type] = numeric;
-        } else if (type === "door") {
-            depotSimState[depotKey].doorOpen = payload.toUpperCase() === "OPEN";
-        } else if (deviceNames[type]) {
-            if (!depotSimState[depotKey].devices) {
-                depotSimState[depotKey].devices = { tv: false, fan: false, toaster: false, coffee: false };
-            }
-            depotSimState[depotKey].devices[type] = payload.toUpperCase() === "ON";
-        }
-    }
-
     if (selectedDepotKey === depotKey) {
         updateModalUI(type, payload);
     }
@@ -342,21 +336,15 @@ function updateQuickUI(depotKey, type, value) {
         card.querySelector(".m-hum").innerText = `${value}%`;
     } else if (type === "door") {
         const doorTag = document.getElementById(`door-${depotKey}`);
-        if (doorTag) {
-            const isOpen = value.toUpperCase() === "OPEN";
-            doorTag.className = `door-tag ${isOpen ? "door-open" : "door-closed"}`;
-            doorTag.innerText = isOpen ? "ACIK" : "KAPALI";
-        }
+        const isOpen = value.toUpperCase() === "OPEN";
+        doorTag.className = `door-tag ${isOpen ? "door-open" : "door-closed"}`;
+        doorTag.innerText = isOpen ? "ACIK" : "KAPALI";
     }
 }
 
 function sendControl(device, state) {
     if (!selectedDepotKey || !currentUser || currentUser.role !== "HOST") return;
-    if (!deviceNames[device]) return;
-
-    const isDoor = device === "door";
-    const validStates = isDoor ? DOOR_COMMAND_STATES : ["ON", "OFF"];
-    if (!validStates.includes(state)) return;
+    if (!deviceNames[device] || (state !== "ON" && state !== "OFF")) return;
 
     if (!mqttClient || !mqttClient.isConnected()) {
         addAuditLog(selectedDepotKey.toUpperCase(), currentUser.name, "HATA: MQTT baglantisi yok, komut gonderilemedi", "log-type-deny");
@@ -369,38 +357,18 @@ function sendControl(device, state) {
     mqttClient.send(mqttMessage);
 
     const deviceLabel = deviceNames[device] || device;
-    let actionText;
-    if (isDoor) {
-        actionText = state === "OPEN" ? "MANUEL OLARAK ACILDI" : "MANUEL OLARAK KAPATILDI";
-    } else {
-        actionText = state === "ON" ? "CALISTIRILDI (ACILDI)" : "DURDURULDU (KAPATILDI)";
-    }
+    const actionText = state === "ON" ? "CALISTIRILDI (ACILDI)" : "DURDURULDU (KAPATILDI)";
 
     addAuditLog(selectedDepotKey.toUpperCase(), currentUser.name, `KOMUT: ${deviceLabel} -> ${actionText}`, "log-type-cmd");
-    showUserNotification(currentUser.name, selectedDepotKey, device, isDoor ? (state === "OPEN" ? "ON" : "OFF") : state);
-
-    if (isDoor) {
-        handleDoorStateChange(selectedDepotKey, state === "OPEN", currentUser.name + " (Manuel Komut)");
-    } else {
-        // Fiziksel cihazdan MQTT echo/onay beklemeden, komutu hemen yerel
-        // durumda ve modal arayuzunde yansit (kroki kapanip acilinca
-        // durumun sifirlanmamasi icin).
-        const simState = depotSimState[selectedDepotKey];
-        if (simState) {
-            if (!simState.devices) simState.devices = { tv: false, fan: false, toaster: false, coffee: false };
-            simState.devices[device] = state === "ON";
-        }
-        updateModalUI(device, state);
-    }
+    showUserNotification(currentUser.name, selectedDepotKey, device, state);
 }
 
 // ============================================================
-// KPI METRIKLERI VE CANLI HESAPLAMALAR
+// KPI METRIKLERI VE CANLI HESAPLAMALAR (A.1)
 // ============================================================
 
 function updateKPICards() {
-    const pkgEl = document.getElementById("kpi-total-packages");
-    if (pkgEl) pkgEl.innerText = totalPackagesProcessed;
+    document.getElementById("kpi-total-packages").innerText = totalPackagesProcessed;
 
     let totalTemp = 0;
     let validTempCount = 0;
@@ -418,29 +386,26 @@ function updateKPICards() {
         }
     });
 
-    const avgTempEl = document.getElementById("kpi-avg-temp");
-    if (avgTempEl && validTempCount > 0) {
-        avgTempEl.innerText = (totalTemp / validTempCount).toFixed(1) + " °C";
+    if (validTempCount > 0) {
+        document.getElementById("kpi-avg-temp").innerText = (totalTemp / validTempCount).toFixed(1) + " °C";
     }
 
     const alarmStatusEl = document.getElementById("kpi-alarm-status");
     const alarmCountEl = document.getElementById("kpi-alarm-count");
 
-    if (alarmStatusEl && alarmCountEl) {
-        if (totalAlarmCount > 0) {
-            alarmStatusEl.innerText = "ALARM VAR";
-            alarmStatusEl.className = "kpi-value status-alarm";
-            alarmCountEl.innerText = `${totalAlarmCount} Depoda Kritik Esik Asildi`;
-        } else {
-            alarmStatusEl.innerText = "NORMAL";
-            alarmStatusEl.className = "kpi-value status-ok";
-            alarmCountEl.innerText = "Tum Eşikler Güvenli";
-        }
+    if (totalAlarmCount > 0) {
+        alarmStatusEl.innerText = "ALARM VAR";
+        alarmStatusEl.className = "kpi-value status-alarm";
+        alarmCountEl.innerText = `${totalAlarmCount} Depoda Kritik Esik Asildi`;
+    } else {
+        alarmStatusEl.innerText = "NORMAL";
+        alarmStatusEl.className = "kpi-value status-ok";
+        alarmCountEl.innerText = "Tum Eşikler Güvenli";
     }
 }
 
 // ============================================================
-// SIMULASYON KONTROL ISLEMLERI
+// SIMULASYON KONTROL ISLEMLERI (E.3)
 // ============================================================
 
 function triggerSimEvent(type) {
@@ -448,19 +413,32 @@ function triggerSimEvent(type) {
         totalPackagesProcessed += Math.floor(Math.random() * 5) + 1;
         updateKPICards();
         addAuditLog("Simulasyon", "Operator", "Depolara yeni paket girisi simule edildi", "log-type-cmd");
+    } else if (type === 'alarm') {
+        const randomDepot = DEPOT_KEYS[Math.floor(Math.random() * DEPOT_KEYS.length)];
+        depotSimState[randomDepot].temp = 32.5; // Alarma dusur
+        applyDepotReading(randomDepot, depotSimState[randomDepot]);
+        addAuditLog(randomDepot.toUpperCase(), "Simulasyon Testi", "Yapay kritik sıcaklık alarmi tetiklendi!", "log-type-alarm");
     } else if (type === 'door') {
         const randomDepot = DEPOT_KEYS[Math.floor(Math.random() * DEPOT_KEYS.length)];
         const newDoorState = !depotSimState[randomDepot].doorOpen;
         depotSimState[randomDepot].doorOpen = newDoorState;
         applyDepotReading(randomDepot, depotSimState[randomDepot]);
         handleDoorStateChange(randomDepot, newDoorState, "Simulasyon Testi");
+    } else if (type === 'toggle_sim') {
+        isSimulationActive = !isSimulationActive;
+        addAuditLog("Simulasyon", "Operator", `Otonom simulasyon ${isSimulationActive ? 'baslatildi' : 'durduruldu'}`, "log-type-login");
     }
 }
 
 // ============================================================
-// ALARM SESI (WEB AUDIO API SENTEZLEYICI)
+// ALARM SESI (TAMAMEN KOD ILE URETILEN SIREN - MP3/WAV DOSYASI YOK)
 // ============================================================
 
+/**
+ * AudioContext'i tembel (lazy) sekilde olusturur/dondurur. Tarayicilar
+ * otomatik ses calmayi kisitladigi icin context, ancak bir kullanici
+ * etkilesiminden (tiklama vb.) sonra "resume" edilebilir.
+ */
 function getAlarmAudioCtx() {
     if (!alarmAudioCtx) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -473,11 +451,16 @@ function getAlarmAudioCtx() {
     return alarmAudioCtx;
 }
 
+/**
+ * Klasik iki tonlu (Avrupa tipi) siren efektini sentezler ve calar.
+ * Hicbir ses dosyasina ihtiyac duymaz; frekansi zamanla salinan bir
+ * osilator + kazanc (gain) zarfi kullanilir.
+ */
 function playAlarmSiren(durationMs = 2200) {
     if (alarmSoundMuted) return;
 
     const ctx = getAlarmAudioCtx();
-    if (!ctx) return;
+    if (!ctx) return; // Tarayici Web Audio API'yi desteklemiyor
 
     const now = ctx.currentTime;
     const totalSec = durationMs / 1000;
@@ -485,7 +468,7 @@ function playAlarmSiren(durationMs = 2200) {
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
-    osc.type = "sawtooth";
+    osc.type = "sawtooth"; // Sirene benzer, sert/dikkat cekici bir tini
     osc.connect(gainNode);
     gainNode.connect(ctx.destination);
 
@@ -494,6 +477,8 @@ function playAlarmSiren(durationMs = 2200) {
     gainNode.gain.setValueAtTime(0.28, now + totalSec - 0.15);
     gainNode.gain.linearRampToValueAtTime(0, now + totalSec);
 
+    // Frekansi 500Hz <-> 900Hz arasinda ileri geri salinan bir "wail"
+    // deseni; her tam cevrim yaklasik 0.5 saniye surer.
     const cycleSec = 0.5;
     const cycles = Math.ceil(totalSec / cycleSec);
     for (let i = 0; i <= cycles; i++) {
@@ -506,11 +491,15 @@ function playAlarmSiren(durationMs = 2200) {
     osc.stop(now + totalSec);
 }
 
+/** Test butonuna basildiginda cagrilir; hem sesi denemek hem de
+ * tarayicinin otomatik ses kisitlamasini bu kullanici etkilesimiyle
+ * "acmak" icin kullanilir. */
 function testAlarmSound() {
     playAlarmSiren(2200);
     addAuditLog("Sistem", currentUser ? currentUser.name : "Ziyaretci", "Alarm sesi test edildi", "log-type-view");
 }
 
+/** Header'daki hoparlor butonuyla alarm sesini ac/kapat (mute) yapar. */
 function toggleAlarmMute() {
     alarmSoundMuted = !alarmSoundMuted;
     const btn = document.getElementById("btn-alarm-mute");
@@ -530,6 +519,14 @@ function toggleAlarmMute() {
 // KAPI ACIK KALMA SURESI TAKIBI (5 DAKIKA ESIGI)
 // ============================================================
 
+/**
+ * Kapi durumu her degistiginde (acildi/kapandi) cagrilir. Her acilip
+ * kapanmada SIREN CALMAZ; sadece bilgi amacli log yazar. Kapi acik
+ * kalirsa DOOR_ALARM_CONFIG.thresholdMs suresi icin bir zamanlayici
+ * baslatir. Sure dolana kadar kapi kapanirsa zamanlayici iptal edilir
+ * ve hicbir alarm sesi calmaz. Sure dolduğunda (kapi hala aciksa)
+ * gercek alarm (log + siren) tetiklenir.
+ */
 function handleDoorStateChange(depotKey, isOpen, sourceLabel) {
     if (!depotDoorState[depotKey]) {
         depotDoorState[depotKey] = { open: false, timerId: null, alarmActive: false };
@@ -540,6 +537,7 @@ function handleDoorStateChange(depotKey, isOpen, sourceLabel) {
     doorState.open = isOpen;
 
     if (isOpen && !wasOpen) {
+        // Kapi yeni acildi -> sadece bilgi logu, SIREN YOK.
         addAuditLog(depotKey.toUpperCase(), sourceLabel, "Kapi acildi", "log-type-view");
 
         if (doorState.timerId) clearTimeout(doorState.timerId);
@@ -558,6 +556,7 @@ function handleDoorStateChange(depotKey, isOpen, sourceLabel) {
         }, DOOR_ALARM_CONFIG.thresholdMs);
 
     } else if (!isOpen && wasOpen) {
+        // Kapi kapandi -> zamanlayiciyi iptal et, alarm varsa sonlandir.
         if (doorState.timerId) {
             clearTimeout(doorState.timerId);
             doorState.timerId = null;
@@ -616,6 +615,10 @@ function checkThresholds(depotKey, type, rawValue) {
     }
 
     if (alarmMsg) {
+        // NOT: Burada bilerek playAlarmSiren() cagrilmiyor. Siren sadece
+        // kapi 5 dakikadan uzun sure acik kalirsa (handleDoorStateChange)
+        // calmali. Sicaklik/nem esik asimlari sadece log + kart uzerinde
+        // gorsel (kirmizi) uyari ile bildiriliyor.
         addAuditLog(depotKey.toUpperCase(), "Esik Alarmi", alarmMsg, isAlarm ? "log-type-alarm" : "log-type-login");
     }
 
@@ -728,43 +731,83 @@ function destroyHistoryChart() {
 }
 
 // ============================================================
-// DEPO DURUMU BASLATMA
+// OTONOM SENSOR SIMULASYONU
 // ============================================================
 
-function initDepotState() {
+function initSensorSimulation() {
     DEPOT_KEYS.forEach((depotKey) => {
         depotSimState[depotKey] = {
             live: false,
-            temp: null,
-            hum: null,
+            temp: randomInRange(19, 25),
+            hum: randomInRange(40, 60),
             doorOpen: false,
-            devices: { tv: false, fan: false, toaster: false, coffee: false },
+            doorTicksLeft: 0,
         };
+        applyDepotReading(depotKey, depotSimState[depotKey]);
         updateLiveBadge(depotKey, false);
     });
+
+    setInterval(stepSimulation, SIMULATION_CONFIG.tickMs);
+}
+
+function stepSimulation() {
+    if (!isSimulationActive) return;
+
+    DEPOT_KEYS.forEach((depotKey) => {
+        const state = depotSimState[depotKey];
+        if (!state || state.live) return;
+
+        state.temp = clamp(
+            state.temp + randomStep(SIMULATION_CONFIG.tempStepMax),
+            SIMULATION_CONFIG.tempMin,
+            SIMULATION_CONFIG.tempMax
+        );
+        state.hum = clamp(
+            state.hum + randomStep(SIMULATION_CONFIG.humStepMax),
+            SIMULATION_CONFIG.humMin,
+            SIMULATION_CONFIG.humMax
+        );
+
+        updateDoorSimState(depotKey, state);
+        applyDepotReading(depotKey, state);
+    });
+
+    totalPackagesProcessed += Math.floor(Math.random() * 2);
+    updateKPICards();
+}
+
+function updateDoorSimState(depotKey, state) {
+    if (!state.doorOpen && Math.random() < SIMULATION_CONFIG.doorOpenChance) {
+        state.doorOpen = true;
+        state.doorTicksLeft = SIMULATION_CONFIG.doorAutoCloseTicks;
+        handleDoorStateChange(depotKey, true, "Otonom Simulasyon");
+    } else if (state.doorOpen) {
+        state.doorTicksLeft -= 1;
+        if (state.doorTicksLeft <= 0) {
+            state.doorOpen = false;
+            handleDoorStateChange(depotKey, false, "Otonom Simulasyon");
+        }
+    }
 }
 
 function applyDepotReading(depotKey, state) {
+    const tempStr = state.temp.toFixed(1);
+    const humStr = Math.round(state.hum).toString();
     const doorStr = state.doorOpen ? "OPEN" : "CLOSED";
+
+    updateQuickUI(depotKey, "temp", tempStr);
+    updateQuickUI(depotKey, "hum", humStr);
     updateQuickUI(depotKey, "door", doorStr);
+
+    checkThresholds(depotKey, "temp", tempStr);
+    checkThresholds(depotKey, "hum", humStr);
+    recordHistory(depotKey, "temp", tempStr);
+    recordHistory(depotKey, "hum", humStr);
+
     if (selectedDepotKey === depotKey) {
+        updateModalUI("temp", tempStr);
+        updateModalUI("hum", humStr);
         updateModalUI("door", doorStr);
-    }
-
-    if (typeof state.temp === "number") {
-        const tempStr = state.temp.toFixed(1);
-        updateQuickUI(depotKey, "temp", tempStr);
-        checkThresholds(depotKey, "temp", tempStr);
-        recordHistory(depotKey, "temp", tempStr);
-        if (selectedDepotKey === depotKey) updateModalUI("temp", tempStr);
-    }
-
-    if (typeof state.hum === "number") {
-        const humStr = Math.round(state.hum).toString();
-        updateQuickUI(depotKey, "hum", humStr);
-        checkThresholds(depotKey, "hum", humStr);
-        recordHistory(depotKey, "hum", humStr);
-        if (selectedDepotKey === depotKey) updateModalUI("hum", humStr);
     }
 }
 
@@ -773,24 +816,28 @@ function markDepotAsLive(depotKey) {
     if (state && !state.live) {
         state.live = true;
         updateLiveBadge(depotKey, true);
-        addAuditLog(depotKey.toUpperCase(), "Sistem", "Canli ESP32/Wokwi sensor verisi algilandi", "log-type-login");
+        addAuditLog(depotKey.toUpperCase(), "Sistem", "Canli sensor verisi algilandi, simulasyon durduruldu", "log-type-login");
     }
 }
 
 function updateLiveBadge(depotKey, isLive) {
     const badge = document.getElementById(`badge-${depotKey}`);
     if (badge) {
-        badge.innerText = isLive ? "CANLI" : "VERI BEKLENIYOR";
+        badge.innerText = isLive ? "CANLI" : "SIMULASYON";
         badge.className = `data-badge ${isLive ? "badge-live" : "badge-sim"}`;
     }
     if (selectedDepotKey === depotKey) {
         const modalBadge = document.getElementById("modal-data-badge");
         if (modalBadge) {
-            modalBadge.innerText = isLive ? "CANLI VERI" : "VERI BEKLENIYOR";
+            modalBadge.innerText = isLive ? "CANLI VERI" : "SIMULE VERI";
             modalBadge.className = `data-badge ${isLive ? "badge-live" : "badge-sim"}`;
         }
     }
 }
+
+function randomInRange(min, max) { return min + Math.random() * (max - min); }
+function randomStep(maxStep) { return (Math.random() * 2 - 1) * maxStep; }
+function clamp(value, min, max) { return Math.min(Math.max(value, min), max); }
 
 // ============================================================
 // KROKI / DETAY MODALI
@@ -823,18 +870,9 @@ function openDetails(depotKey, title) {
     const state = depotSimState[depotKey];
     updateLiveBadge(depotKey, !!(state && state.live));
 
-    if (state && state.live) {
-        if (typeof state.temp === "number") updateModalUI("temp", state.temp.toFixed(1));
-        if (typeof state.hum === "number") updateModalUI("hum", Math.round(state.hum).toString());
-    }
-
-    if (state) {
-        updateModalUI("door", state.doorOpen ? "OPEN" : "CLOSE");
-        if (state.devices) {
-            Object.keys(state.devices).forEach((device) => {
-                updateModalUI(device, state.devices[device] ? "ON" : "OFF");
-            });
-        }
+    if (state && !state.live) {
+        updateModalUI("temp", state.temp.toFixed(1));
+        updateModalUI("hum", Math.round(state.hum).toString());
     }
 
     renderHistoryChart(depotKey);
@@ -851,14 +889,12 @@ function closeDetails() {
 
 function updateModalUI(type, value) {
     const upperValue = value.toUpperCase();
-    const isOn = type === "door" ? upperValue === "OPEN" : upperValue === "ON";
+    const isOn = upperValue === "ON";
 
     if (type === "temp") {
-        const tempEl = document.getElementById("modal-temp");
-        if (tempEl) tempEl.innerText = `${value} °C`;
+        document.getElementById("modal-temp").innerText = `${value} °C`;
     } else if (type === "hum") {
-        const humEl = document.getElementById("modal-hum");
-        if (humEl) humEl.innerText = `${value} %`;
+        document.getElementById("modal-hum").innerText = `${value} %`;
     }
 
     const statusText = document.getElementById(`m-status-${type}`);
@@ -884,7 +920,7 @@ function resetModalValues() {
         if (el) el.innerText = "--";
     });
 
-    ["tv", "toaster", "coffee", "fan", "door"].forEach((device) => {
+    ["tv", "toaster", "coffee", "fan"].forEach((device) => {
         const statusEl = document.getElementById(`m-status-${device}`);
         if (statusEl) {
             statusEl.innerText = "KAPALI";
@@ -899,7 +935,7 @@ function resetModalValues() {
 }
 
 // ============================================================
-// DENETIM (AUDIT) LOGLARI VE FILTRELEME
+// DENETIM (AUDIT) LOGLARI VE FILTRELEME (C.2)
 // ============================================================
 
 function addAuditLog(location, user, action, cssClass = "") {
@@ -987,8 +1023,6 @@ function exportLogsToCsv() {
 
 function showUserNotification(user, depotKey, device, state) {
     const area = document.getElementById("notification-area");
-    if (!area) return;
-
     const depotName = depotKey.charAt(0).toUpperCase() + depotKey.slice(1);
     const deviceLabel = deviceNames[device] || device;
     const actionLabel = state === "ON" ? "ACTI" : "KAPATTI";
@@ -1023,8 +1057,6 @@ function showUserNotification(user, depotKey, device, state) {
 
 function updateMqttStatus(isOnline) {
     const statusEl = document.getElementById("mqtt-status");
-    if (statusEl) {
-        statusEl.innerText = isOnline ? "MQTT: BAGLANDI" : "MQTT: BAGLANTI YOK";
-        statusEl.style.background = isOnline ? "var(--safe-green)" : "var(--alarm-red)";
-    }
+    statusEl.innerText = isOnline ? "MQTT: BAGLANDI" : "MQTT: BAGLANTI YOK";
+    statusEl.style.background = isOnline ? "var(--safe-green)" : "var(--alarm-red)";
 }
