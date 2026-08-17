@@ -476,9 +476,6 @@ function triggerSimEvent(type) {
         depotSimState[randomDepot].doorOpen = newDoorState;
         applyDepotReading(randomDepot, depotSimState[randomDepot]);
         handleDoorStateChange(randomDepot, newDoorState, "Simulasyon Testi");
-    } else if (type === 'toggle_sim') {
-        isSimulationActive = !isSimulationActive;
-        addAuditLog("Simulasyon", "Operator", `Otonom simulasyon ${isSimulationActive ? 'baslatildi' : 'durduruldu'}`, "log-type-login");
     }
 }
 
