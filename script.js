@@ -23,6 +23,8 @@ const deviceNames = {
     coffee: "Ofis Kahve Makinesi",
 };
 
+const DEVICE_KEYS = ["tv", "fan", "toaster", "coffee"];
+
 const MQTT_CONFIG = {
     host: "broker.hivemq.com",
     port: 8884,
@@ -89,6 +91,12 @@ const depotSimState = {};
 const depotAlarmState = {};
 const depotHistory = {};
 const depotDoorState = {}; // { [depotKey]: { open, timerId, alarmActive } }
+
+// Kroki panelindeki cihaz (fan/tv/tost/kahve) durumlarini depo basina
+// kalici olarak tutar. Boylece panel kapatilip acildiginda veya baska
+// bir depoya bakip geri donuldugunde, host'un actigi bir cihaz kendiliginden
+// "kapali" gorunmez - ancak host bizzat KAPAT butonuna basarsa degisir.
+const depotDeviceState = {}; // { [depotKey]: { tv, fan, toaster, coffee } (boolean) }
 
 let loginFailCount = 0;
 let loginLockedUntil = 0;
@@ -315,6 +323,11 @@ function onMessageArrived(message) {
     checkThresholds(depotKey, type, payload);
     recordHistory(depotKey, type, payload);
 
+    if (DEVICE_KEYS.includes(type)) {
+        if (!depotDeviceState[depotKey]) depotDeviceState[depotKey] = {};
+        depotDeviceState[depotKey][type] = payload.toUpperCase() === "ON";
+    }
+
     if (selectedDepotKey === depotKey) {
         updateModalUI(type, payload);
     }
@@ -356,11 +369,50 @@ function sendControl(device, state) {
     mqttMessage.destinationName = topic;
     mqttClient.send(mqttMessage);
 
+    // Komut gonderilir gonderilmez arayuzu iyimser (optimistic) sekilde
+    // guncelliyoruz ve depo bazinda kaliciyoruz; boylece panel kapatilip
+    // tekrar acildiginda ya da baska depoya bakip geri donuldugunde
+    // cihaz "kendiliginden kapanmis" gibi gorunmez.
+    if (!depotDeviceState[selectedDepotKey]) {
+        depotDeviceState[selectedDepotKey] = {};
+    }
+    depotDeviceState[selectedDepotKey][device] = state === "ON";
+    updateModalUI(device, state);
+
     const deviceLabel = deviceNames[device] || device;
     const actionText = state === "ON" ? "CALISTIRILDI (ACILDI)" : "DURDURULDU (KAPATILDI)";
 
     addAuditLog(selectedDepotKey.toUpperCase(), currentUser.name, `KOMUT: ${deviceLabel} -> ${actionText}`, "log-type-cmd");
     showUserNotification(currentUser.name, selectedDepotKey, device, state);
+}
+
+/** Kroki panelindeki manuel kapi ac/kapat butonlari icin. Gercek MQTT
+ * cihazina komut gonderir; ayrica simule (canli olmayan) depolarda
+ * durumu aninda yansitmak icin depotSimState'i de gunceller. */
+function sendDoorControl(action) {
+    if (!selectedDepotKey || !currentUser || currentUser.role !== "HOST") return;
+    if (action !== "OPEN" && action !== "CLOSE") return;
+
+    const isOpen = action === "OPEN";
+    const payload = isOpen ? "OPEN" : "CLOSED";
+
+    if (mqttClient && mqttClient.isConnected()) {
+        const topic = `${MQTT_CONFIG.baseTopic}/${selectedDepotKey}/door/set`;
+        const mqttMessage = new Paho.MQTT.Message(payload);
+        mqttMessage.destinationName = topic;
+        mqttClient.send(mqttMessage);
+    }
+
+    const state = depotSimState[selectedDepotKey];
+    if (state && !state.live) {
+        state.doorOpen = isOpen;
+        state.doorTicksLeft = isOpen ? SIMULATION_CONFIG.doorAutoCloseTicks : 0;
+    }
+
+    updateQuickUI(selectedDepotKey, "door", payload);
+    updateModalUI("door", payload);
+    handleDoorStateChange(selectedDepotKey, isOpen, `${currentUser.name} (Manuel)`);
+    updateKPICards();
 }
 
 // ============================================================
@@ -743,6 +795,7 @@ function initSensorSimulation() {
             doorOpen: false,
             doorTicksLeft: 0,
         };
+        depotDeviceState[depotKey] = { tv: false, fan: false, toaster: false, coffee: false };
         applyDepotReading(depotKey, depotSimState[depotKey]);
         updateLiveBadge(depotKey, false);
     });
@@ -866,6 +919,7 @@ function openDetails(depotKey, title) {
     document.getElementById("modal-title").innerText = title;
     document.getElementById("details-overlay").style.display = "flex";
     resetModalValues();
+    restoreModalDeviceStates(depotKey);
 
     const state = depotSimState[depotKey];
     updateLiveBadge(depotKey, !!(state && state.live));
@@ -874,6 +928,13 @@ function openDetails(depotKey, title) {
         updateModalUI("temp", state.temp.toFixed(1));
         updateModalUI("hum", Math.round(state.hum).toString());
     }
+
+    // Kapi durumunu da (canli veya simule fark etmeksizin) son bilinen
+    // haliyle geri yukle - panel her acildiginda sifirlanmasin.
+    const doorIsOpen = state && state.live
+        ? !!(depotDoorState[depotKey] && depotDoorState[depotKey].open)
+        : !!(state && state.doorOpen);
+    updateModalUI("door", doorIsOpen ? "OPEN" : "CLOSED");
 
     renderHistoryChart(depotKey);
 }
@@ -889,7 +950,9 @@ function closeDetails() {
 
 function updateModalUI(type, value) {
     const upperValue = value.toUpperCase();
-    const isOn = upperValue === "ON";
+    const isDoor = type === "door";
+    // Kapi icin ON/OFF degil OPEN/CLOSED payload'i kullanilir.
+    const isOn = isDoor ? upperValue === "OPEN" : upperValue === "ON";
 
     if (type === "temp") {
         document.getElementById("modal-temp").innerText = `${value} °C`;
@@ -908,9 +971,9 @@ function updateModalUI(type, value) {
         svgIcon.setAttribute("class", `device-icon ${isOn ? "device-on" : "device-off"}`);
     }
 
-    if (type === "door") {
+    if (isDoor) {
         const doorSvg = document.getElementById("svg-door-main");
-        if (doorSvg) doorSvg.classList.toggle("door-open-w", upperValue === "OPEN");
+        if (doorSvg) doorSvg.classList.toggle("door-open-w", isOn);
     }
 }
 
@@ -920,7 +983,7 @@ function resetModalValues() {
         if (el) el.innerText = "--";
     });
 
-    ["tv", "toaster", "coffee", "fan"].forEach((device) => {
+    ["tv", "toaster", "coffee", "fan", "door"].forEach((device) => {
         const statusEl = document.getElementById(`m-status-${device}`);
         if (statusEl) {
             statusEl.innerText = "KAPALI";
@@ -932,6 +995,21 @@ function resetModalValues() {
 
     const doorSvg = document.getElementById("svg-door-main");
     if (doorSvg) doorSvg.classList.remove("door-open-w");
+}
+
+/** Kroki paneli acildiginda, o depoda daha once host tarafindan
+ * ac/kapat yapilmis cihazlarin (fan/tv/tost/kahve) son durumunu
+ * geri yukler. Panel kapatilip acilsa bile bu durum kaybolmaz;
+ * yalnizca host KAPAT butonuna basarsa degisir. */
+function restoreModalDeviceStates(depotKey) {
+    const devState = depotDeviceState[depotKey];
+    if (!devState) return;
+
+    DEVICE_KEYS.forEach((device) => {
+        if (device in devState) {
+            updateModalUI(device, devState[device] ? "ON" : "OFF");
+        }
+    });
 }
 
 // ============================================================
