@@ -1,0 +1,261 @@
+/* ================================================================
+   DHL M2X DEPO OTOMASYONU - ESP32 FIRMWARE (ESENYURT)
+   ================================================================
+   Bu kod, "DHL M2X Depo Yonetim Paneli" (script.js) ile birebir
+   uyumlu calisacak sekilde yazilmistir. Web sitesindeki MQTT
+   ayarlariyla ESP32'nin ayarlari AYNI olmalidir:
+
+     Broker   : broker.hivemq.com
+     Port     : 1883 (duz MQTT, TLS degil - ESP32 tarafi icin)
+     BaseTopic: lojistik
+
+   ------------------------------------------------------------
+   DEVRE / PIN BAGLANTILARI
+   ------------------------------------------------------------
+     DHT22            -> GPIO 15  (data)
+     Buzzer            -> GPIO 2
+     I2C LCD (16x2)     -> SDA = GPIO 23 , SCL = GPIO 22
+     LED - Kahve Mak.   -> GPIO 4
+     LED - Tost Mak.    -> GPIO 19
+     LED - TV           -> GPIO 25
+     LED - Kapi Durumu  -> GPIO 18
+     LED - Havalandirma -> GPIO 17
+
+   GEREKLI KUTUPHANELER:
+     - PubSubClient        (Nick O'Leary)
+     - DHT sensor library   (Adafruit)
+     - Adafruit Unified Sensor
+     - LiquidCrystal I2C     (Frank de Brabander / Marco Schwartz)
+   ================================================================ */
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <Wire.h>
+#include <DHT.h>
+#include <LiquidCrystal_I2C.h>
+
+#define DEPO_ADI "esenyurt"
+
+const char* WIFI_SSID     = "Wokwi-GUEST";
+const char* WIFI_PASSWORD = "";
+
+const char* MQTT_HOST = "broker.hivemq.com";
+const int   MQTT_PORT = 1883;
+const char* MQTT_BASE_TOPIC = "lojistik";
+
+#define DHT_PIN     15
+#define DHT_TYPE    DHT22
+
+#define BUZZER_PIN  2
+
+#define I2C_SDA     23
+#define I2C_SCL     22
+
+#define LED_KAHVE   4
+#define LED_TOST    19
+#define LED_TV      25
+#define LED_KAPI    18
+#define LED_FAN     17
+
+const float TEMP_MIN = 10.0;
+const float TEMP_MAX = 27.0;
+const float HUM_MIN  = 20.0;
+const float HUM_MAX  = 75.0;
+const unsigned long KAPI_ALARM_SURESI_MS = 5UL * 60UL * 1000UL;
+
+String T_TEMP        = String(MQTT_BASE_TOPIC) + "/" + DEPO_ADI + "/temp";
+String T_HUM         = String(MQTT_BASE_TOPIC) + "/" + DEPO_ADI + "/hum";
+
+String T_CTRL_TV      = String(MQTT_BASE_TOPIC) + "/" + DEPO_ADI + "/tv/set";
+String T_CTRL_TOAST   = String(MQTT_BASE_TOPIC) + "/" + DEPO_ADI + "/toaster/set";
+String T_CTRL_COFFEE  = String(MQTT_BASE_TOPIC) + "/" + DEPO_ADI + "/coffee/set";
+String T_CTRL_FAN     = String(MQTT_BASE_TOPIC) + "/" + DEPO_ADI + "/fan/set";
+String T_CTRL_DOOR    = String(MQTT_BASE_TOPIC) + "/" + DEPO_ADI + "/door/set";
+
+DHT dht(DHT_PIN, DHT_TYPE);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+float sicaklik = 0;
+float nem = 0;
+
+bool kapiAcik = false;
+unsigned long kapiAcilmaZamani = 0;
+bool kapiAlarmAktif = false;
+
+unsigned long sonDHTOkuma = 0;
+unsigned long sonYayin = 0;
+unsigned long sonLCDGuncelleme = 0;
+unsigned long sonBuzzerBeep = 0;
+bool buzzerBeepState = false;
+
+void wifiBaglan() {
+  Serial.print("WiFi baglaniyor: ");
+  Serial.println(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi baglandi. IP: " + WiFi.localIP().toString());
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String msg;
+  for (unsigned int i = 0; i < length; i++) msg += (char)payload[i];
+  msg.trim();
+  msg.toUpperCase();
+  String t = String(topic);
+
+  Serial.println("MQTT <- " + t + " : " + msg);
+
+  bool acik = (msg == "ON");
+
+  if (t == T_CTRL_TV) {
+    digitalWrite(LED_TV, acik ? HIGH : LOW);
+
+  } else if (t == T_CTRL_TOAST) {
+    digitalWrite(LED_TOST, acik ? HIGH : LOW);
+
+  } else if (t == T_CTRL_COFFEE) {
+    digitalWrite(LED_KAHVE, acik ? HIGH : LOW);
+
+  } else if (t == T_CTRL_FAN) {
+    digitalWrite(LED_FAN, acik ? HIGH : LOW);
+
+  } else if (t == T_CTRL_DOOR) {
+    bool yeniKapiDurumu = (msg == "OPEN");
+    if (yeniKapiDurumu && !kapiAcik) {
+      kapiAcilmaZamani = millis();
+    }
+    if (!yeniKapiDurumu) {
+      kapiAlarmAktif = false;
+    }
+    kapiAcik = yeniKapiDurumu;
+    digitalWrite(LED_KAPI, kapiAcik ? HIGH : LOW);
+  }
+}
+
+void mqttReconnect() {
+  while (!mqttClient.connected()) {
+    Serial.print("MQTT baglaniyor... ");
+    String clientId = String("ESP32-") + DEPO_ADI + "-" + String(random(0xffff), HEX);
+
+    if (mqttClient.connect(clientId.c_str())) {
+      Serial.println("baglandi.");
+      mqttClient.subscribe(T_CTRL_TV.c_str());
+      mqttClient.subscribe(T_CTRL_TOAST.c_str());
+      mqttClient.subscribe(T_CTRL_COFFEE.c_str());
+      mqttClient.subscribe(T_CTRL_FAN.c_str());
+      mqttClient.subscribe(T_CTRL_DOOR.c_str());
+    } else {
+      Serial.print("hata rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" 2sn sonra tekrar denenecek");
+      delay(2000);
+    }
+  }
+}
+
+void buzzerGuncelle() {
+  bool sicaklikAlarmi = (sicaklik < TEMP_MIN || sicaklik > TEMP_MAX);
+  bool nemAlarmi       = (nem < HUM_MIN || nem > HUM_MAX);
+
+  if (kapiAcik && !kapiAlarmAktif &&
+      (millis() - kapiAcilmaZamani > KAPI_ALARM_SURESI_MS)) {
+    kapiAlarmAktif = true;
+    Serial.println("ALARM: Kapi 5 dakikadir acik!");
+  }
+
+  bool alarmVar = sicaklikAlarmi || nemAlarmi || kapiAlarmAktif;
+
+  if (alarmVar) {
+    if (millis() - sonBuzzerBeep > 400) {
+      sonBuzzerBeep = millis();
+      buzzerBeepState = !buzzerBeepState;
+      digitalWrite(BUZZER_PIN, buzzerBeepState ? HIGH : LOW);
+    }
+  } else {
+    digitalWrite(BUZZER_PIN, LOW);
+    buzzerBeepState = false;
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(300);
+  Serial.println("\n=== DEPO OTOMASYONU: " DEPO_ADI " ===");
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_KAHVE, OUTPUT);
+  pinMode(LED_TOST, OUTPUT);
+  pinMode(LED_TV, OUTPUT);
+  pinMode(LED_KAPI, OUTPUT);
+  pinMode(LED_FAN, OUTPUT);
+
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(LED_KAHVE, LOW);
+  digitalWrite(LED_TOST, LOW);
+  digitalWrite(LED_TV, LOW);
+  digitalWrite(LED_KAPI, LOW);
+  digitalWrite(LED_FAN, LOW);
+
+  Wire.begin(I2C_SDA, I2C_SCL);
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Depo: " DEPO_ADI);
+  delay(1200);
+  lcd.clear();
+
+  dht.begin();
+
+  wifiBaglan();
+
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  mqttClient.setCallback(mqttCallback);
+
+  randomSeed(micros());
+}
+
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
+    wifiBaglan();
+  }
+  if (!mqttClient.connected()) {
+    mqttReconnect();
+  }
+  mqttClient.loop();
+
+  unsigned long simdi = millis();
+
+  if (simdi - sonDHTOkuma > 2000) {
+    sonDHTOkuma = simdi;
+    float s = dht.readTemperature();
+    float n = dht.readHumidity();
+    if (!isnan(s) && !isnan(n)) {
+      sicaklik = s;
+      nem = n;
+    } else {
+      Serial.println("DHT22 okuma hatasi!");
+    }
+  }
+
+  if (simdi - sonLCDGuncelleme > 1000) {
+    sonLCDGuncelleme = simdi;
+    lcd.setCursor(0, 0);
+    lcd.print("Sic: " + String(sicaklik, 1) + "C   ");
+    lcd.setCursor(0, 1);
+    lcd.print("Nem: " + String(nem, 1) + "%   ");
+  }
+
+  if (simdi - sonYayin > 3000) {
+    sonYayin = simdi;
+    mqttClient.publish(T_TEMP.c_str(), String(sicaklik, 1).c_str());
+    mqttClient.publish(T_HUM.c_str(), String((int)round(nem)).c_str());
+  }
+
+  buzzerGuncelle();
+}
